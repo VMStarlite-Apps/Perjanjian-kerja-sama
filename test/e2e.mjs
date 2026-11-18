@@ -1,0 +1,176 @@
+// Uji end-to-end terhadap `wrangler dev` lokal (mode dev). Jalankan: node test/e2e.mjs
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
+import { execSync } from 'node:child_process';
+import { writeFileSync, mkdirSync } from 'node:fs';
+
+const BASE = process.env.BASE || 'http://127.0.0.1:8787';
+const ADMIN = 'vendormanagement@pmosurge.co.id', LEGAL = 'legal.uji@pmosurge.co.id', MGMT = 'direksi.uji@pmosurge.co.id';
+mkdirSync('test/out', { recursive: true });
+
+let pass = 0, failN = 0;
+const ok = (cond, name, extra = '') => { if (cond) { pass++; console.log('  ✓', name); } else { failN++; console.log('  ✗', name, extra); } };
+
+async function api(path, { method = 'GET', body, user = ADMIN, token, form, raw } = {}) {
+  const headers = { 'x-dev-user': user };
+  if (token) headers['x-portal-token'] = token;
+  let b;
+  if (form) { b = new FormData(); for (const [k, v] of Object.entries(form)) b.append(k, v); }
+  else if (body !== undefined) { headers['content-type'] = 'application/json'; b = JSON.stringify(body); }
+  const r = await fetch(BASE + path, { method, headers, body: b });
+  if (raw) return r;
+  const j = await r.json().catch(() => ({}));
+  return { status: r.status, ...j, _json: j };
+}
+
+async function pdf(pages, label) {
+  const d = await PDFDocument.create();
+  const f = await d.embedFont(StandardFonts.Helvetica);
+  for (let i = 1; i <= pages; i++) {
+    const p = d.addPage([595, 842]);
+    p.drawText(`${label} — halaman ${i}/${pages}`, { x: 60, y: 780, size: 14, font: f, color: rgb(0.04, 0.23, 0.46) });
+    if (i === pages) { p.drawText('PIHAK KEDUA (Mitra)', { x: 60, y: 260, size: 11, font: f }); p.drawText('PIHAK PERTAMA (PT IJE)', { x: 360, y: 260, size: 11, font: f }); }
+  }
+  return new Blob([await d.save()], { type: 'application/pdf' });
+}
+// PNG tanda tangan sederhana (dibuat dengan pdf-lib tidak bisa; pakai PNG 1x1 diperbesar? gunakan PNG valid kecil)
+import { readFileSync } from 'node:fs';
+function pngSig() {
+  return new Blob([readFileSync('test/fixtures/ttd-scan.png')], { type: 'image/png' });
+}
+function _unused() {
+  // PNG 4x2 RGBA biru tua, cukup untuk uji embed
+  const b64 = 'iVBORw0KGgoAAAANSUhEUgAAAAQAAAACCAYAAACZgbYnAAAAFklEQVR4nGNgYGD4z4AKGBkYGEgFAA0DAQEz9vC1AAAAAElFTkSuQmCC';
+  return new Blob([Buffer.from(b64, 'base64')], { type: 'image/png' });
+}
+const tokenOf = (url) => url.split('#t=')[1];
+const d1 = (sql) => { try { return execSync(`npx wrangler d1 execute starlite-pks --local --command ${JSON.stringify(sql)} 2>&1`).toString(); } catch (e) { return e.stdout.toString() + e.stderr?.toString(); } };
+
+console.log('Starlite — uji end-to-end\n');
+
+console.log('Sesi & data mitra');
+const me = await api('/api/me');
+ok(me.status === 200 && me.peran === 'admin', 'login dev sebagai admin');
+ok((await api('/api/me', { user: 'orang.luar@gmail.com' })).status === 403, 'akun tidak terdaftar ditolak (403)');
+const mitra = await api('/api/mitra?batch=1');
+ok(Array.isArray(mitra._json) && mitra._json.length === 10, 'daftar batch awal terbaca dari starlite-vm (10 mitra di seed lokal)', JSON.stringify(mitra).slice(0, 200));
+const genz = mitra._json.find((m) => m.row === 126);
+ok(genz && genz.emails.length === 3, 'email multi-alamat dinormalisasi (3 alamat GENZ)');
+const pad = mitra._json.find((m) => m.row === 241);
+ok(pad && pad.emails.length === 1, 'format <alamat> tidak menggandakan email');
+
+console.log('\nTahap 0 — buat perjanjian');
+const master = await pdf(2, 'PERJANJIAN KERJA SAMA JASA');
+ok((await api('/api/perjanjian', { method: 'POST', form: { mitra_row: 94, judul: 'PKS Jasa FTTH', master: new Blob(['bukan pdf'], { type: 'text/plain' }) } })).status === 400, 'master bukan PDF ditolak');
+ok((await api('/api/perjanjian', { method: 'POST', user: MGMT, form: { mitra_row: 94, judul: 'x', master } })).status === 403, 'peran Manajemen tidak bisa membuat perjanjian');
+const c1 = await api('/api/perjanjian', { method: 'POST', form: { mitra_row: 94, jenis: 'PKS', judul: 'Perjanjian Kerja Sama Jasa FTTH 2026', master } });
+ok(c1.status === 201 && c1.id, 'perjanjian dibuat', JSON.stringify(c1));
+const id = c1.id;
+let det = await api(`/api/perjanjian/${id}`);
+ok(det.tahap === 0 && det.dokumen.length === 1 && det.dokumen[0].halaman === 2 && det.dokumen[0].sha256.length === 64, 'master tersimpan dengan hash & jumlah halaman');
+
+const c2 = await api('/api/perjanjian', { method: 'POST', form: { mitra_row: 400, judul: 'PKS Lentera', master } });
+const k2 = await api(`/api/perjanjian/${c2.id}/kirim`, { method: 'POST' });
+ok(k2.status === 422 && /Email/.test(k2.error), 'kirim ke mitra tanpa email ditolak dengan pesan jelas', JSON.stringify(k2));
+
+console.log('\nTahap 1 — kirim ke mitra');
+ok((await api(`/api/perjanjian/${id}/legal`, { method: 'POST' })).status === 409, 'tidak bisa lompat ke Legal dari Draf');
+const k1 = await api(`/api/perjanjian/${id}/kirim`, { method: 'POST' });
+ok(k1.status === 200 && k1.mode === 'simulasi' && k1.portal, 'email terkirim (simulasi) + tautan portal');
+const tFeedback = tokenOf(k1.portal);
+det = await api(`/api/perjanjian/${id}`);
+ok(det.tahap === 1 && det.tenggat && det.email[0].penerima.includes('desnarum'), 'tahap 1, tenggat SLA terisi, penerima benar');
+
+console.log('\nTahap 2 — feedback mitra (portal)');
+ok((await api('/api/portal', { token: 'salah-token-xxxxxxxxxxxxxxx' })).status === 401, 'token palsu ditolak');
+const pv = await api('/api/portal', { token: tFeedback });
+ok(pv.status === 200 && pv.bisa_feedback && !pv.bisa_ttd, 'portal mitra terbuka untuk tanggapan');
+const dl = await api('/api/portal/dokumen', { token: tFeedback, raw: true });
+ok(dl.status === 200 && (await dl.arrayBuffer()).byteLength > 500, 'mitra dapat mengunduh dokumen');
+ok((await api('/api/portal/ttd', { method: 'POST', token: tFeedback, form: { opsi: '2', berkas: master } })).status === 403, 'token tanggapan tidak bisa dipakai untuk TTD');
+await api('/api/portal/feedback', { method: 'POST', token: tFeedback, body: { nama: 'Budi (Direktur)', isi: 'Mohon pasal 5 tentang termin pembayaran dijelaskan.' } });
+await api('/api/portal/feedback', { method: 'POST', token: tFeedback, body: { setuju: true } });
+det = await api(`/api/perjanjian/${id}`);
+ok(det.tahap === 2 && det.feedback.length === 2 && det.feedback[1].setuju === 1, 'dua putaran feedback tercatat, tahap 2');
+
+console.log('\nTahap 3–4 — Legal & nomor surat');
+ok((await api(`/api/perjanjian/${id}/legal`, { method: 'POST', user: LEGAL })).status === 403, 'Legal tidak bisa menyerahkan ke dirinya');
+ok((await api(`/api/perjanjian/${id}/legal`, { method: 'POST' })).ok, 'diserahkan ke Legal');
+ok((await api(`/api/perjanjian/${id}/nomor`, { method: 'POST', user: LEGAL, form: { nomor_surat: '001/PKS/IJE/XI/2026', dokumen: await pdf(3, 'X') } })).status === 422, 'PDF bernomor beda jumlah halaman ditolak');
+ok((await api(`/api/perjanjian/${id}/nomor`, { method: 'POST', user: LEGAL, form: { nomor_surat: 'x', dokumen: await pdf(2, 'X') } })).status === 400, 'format nomor tidak valid ditolak');
+const bernomor = await pdf(2, 'PERJANJIAN No. 001/PKS/IJE/XI/2026');
+const n1 = await api(`/api/perjanjian/${id}/nomor`, { method: 'POST', user: LEGAL, form: { nomor_surat: '001/PKS/IJE/XI/2026', dokumen: bernomor } });
+ok(n1.ok, 'Legal menerbitkan nomor', JSON.stringify(n1));
+
+console.log('\nTahap 5 — bagikan ke mitra');
+const b1 = await api(`/api/perjanjian/${id}/bagikan`, { method: 'POST' });
+ok(b1.ok && b1.portal, 'dibagikan, tautan TTD baru');
+const tTtd = tokenOf(b1.portal);
+ok((await api('/api/portal', { token: tFeedback })).status === 401, 'tautan lama otomatis dicabut');
+
+console.log('\nTahap 6 — TTD mitra (dua opsi)');
+const prev = await api('/api/portal/pratinjau-ttd', { method: 'POST', token: tTtd, form: { berkas: pngSig() }, raw: true });
+const prevBytes = new Uint8Array(await prev.arrayBuffer());
+ok(prev.status === 200 && prev.headers.get('content-type') === 'application/pdf', 'pratinjau opsi 1 menghasilkan PDF');
+writeFileSync('test/out/pratinjau-ttd.pdf', prevBytes);
+det = await api(`/api/perjanjian/${id}`);
+ok(det.dokumen.filter((d) => d.jenis === 'ttd_mitra').length === 0, 'pratinjau tidak menyimpan dokumen');
+ok((await api('/api/portal/ttd', { method: 'POST', token: tTtd, form: { opsi: '2', berkas: await pdf(1, 'scan') } })).status === 422, 'opsi 2: scan kurang halaman ditolak');
+ok((await api('/api/portal/ttd', { method: 'POST', token: tTtd, form: { opsi: '1', berkas: new Blob(['x'], { type: 'image/gif' }) } })).status === 400, 'opsi 1: format gambar tidak didukung ditolak');
+ok((await api('/api/portal/ttd', { method: 'POST', token: tTtd, form: { opsi: '1', berkas: pngSig() } })).ok, 'opsi 1: TTD ditempel otomatis, menunggu review');
+ok((await api(`/api/perjanjian/${id}/ttd-mitra/review`, { method: 'POST', body: { setuju: false, alasan: '' } })).status === 400, 'penolakan tanpa alasan ditolak');
+const rj = await api(`/api/perjanjian/${id}/ttd-mitra/review`, { method: 'POST', body: { setuju: false, alasan: 'Meterai tidak terlihat jelas pada scan' } });
+ok(rj.ok && rj.portal, 'VM menolak TTD, tautan unggah ulang terkirim');
+const tTtd2 = tokenOf(rj.portal);
+ok((await api('/api/portal/ttd', { method: 'POST', token: tTtd2, form: { opsi: '2', berkas: await pdf(2, 'SCAN BERTANDA TANGAN') } })).ok, 'opsi 2: scan dokumen penuh diunggah');
+ok((await api(`/api/perjanjian/${id}/ttd-mitra/review`, { method: 'POST', body: { setuju: true } })).ok, 'VM menyetujui TTD mitra');
+det = await api(`/api/perjanjian/${id}`);
+const ttdDocs = det.dokumen.filter((d) => d.jenis === 'ttd_mitra');
+ok(det.tahap === 6 && ttdDocs.some((d) => d.penanda === 'hasil_tempel' && d.status === 'ditolak') && ttdDocs.some((d) => d.penanda === 'scan_asli' && d.status === 'aktif'), 'penanda Hasil Tempel/Scan Asli & status tersimpan');
+
+console.log('\nTahap 7 — TTD PT IJE & arsip final');
+ok((await api(`/api/perjanjian/${id}/ttd-ije`, { method: 'POST', user: MGMT, form: { opsi: '1', berkas: pngSig() } })).status === 403, 'bukan penandatangan ditolak');
+const f1 = await api(`/api/perjanjian/${id}/ttd-ije`, { method: 'POST', form: { opsi: '1', berkas: pngSig(), tgl_efektif: '2026-11-20' } });
+ok(f1.ok, 'PT IJE TTD (opsi 1), perjanjian selesai', JSON.stringify(f1));
+det = await api(`/api/perjanjian/${id}`);
+ok(det.tahap === 7 && det.tgl_berakhir === '2027-11-19' && det.tampil === 'aktif', 'tanggal efektif & berakhir (12 bulan) benar');
+const final = det.dokumen.find((d) => d.jenis === 'final');
+const fr = await api(`/api/dokumen/${final.id}`, { raw: true });
+const finalBytes = new Uint8Array(await fr.arrayBuffer());
+writeFileSync('test/out/final.pdf', finalBytes);
+ok((await PDFDocument.load(finalBytes)).getPageCount() === 2, 'dokumen final terbaca, 2 halaman');
+ok(det.email.some((e) => e.tipe === 'final'), 'salinan final dikirim ke mitra');
+ok((await api(`/api/perjanjian/${id}/batal`, { method: 'POST', body: { alasan: 'uji batal setelah final' } })).status === 409, 'perjanjian final tidak bisa dibatalkan');
+
+console.log('\nIntegritas & audit');
+const masterDoc = det.dokumen.find((d) => d.jenis === 'master');
+const out1 = d1(`UPDATE pks_dokumen SET sha256='abc' WHERE id='${masterDoc.id}'`);
+ok(/terkunci/i.test(out1), 'metadata dokumen terkunci (trigger DB)');
+const out2 = d1(`DELETE FROM pks_audit`);
+ok(/tidak dapat dihapus/i.test(out2), 'audit log tidak dapat dihapus (trigger DB)');
+d1(`UPDATE pks_blob SET data = X'00' WHERE id = (SELECT storage_id FROM pks_dokumen WHERE id='${masterDoc.id}')`);
+const tam = await api(`/api/dokumen/${masterDoc.id}`);
+ok(tam.status === 409 && /tidak sesuai/.test(tam.error), 'berkas diubah di luar aplikasi terdeteksi "tidak sesuai"');
+ok(det.audit.length >= 15, `audit log lengkap (${det.audit.length} entri)`);
+
+console.log('\nKoreksi alur, pengingat, dashboard');
+const c3 = await api('/api/perjanjian', { method: 'POST', form: { mitra_row: 336, judul: 'PKS Triza', master } });
+await api(`/api/perjanjian/${c3.id}/kirim`, { method: 'POST' });
+ok((await api(`/api/perjanjian/${c3.id}/mundur`, { method: 'POST', body: { ke: 0, alasan: '' } })).status === 400, 'pengembalian tanpa alasan ditolak');
+ok((await api(`/api/perjanjian/${c3.id}/mundur`, { method: 'POST', body: { ke: 0, alasan: 'Lampiran salah, kirim ulang' } })).ok, 'tahap dikembalikan dengan alasan');
+await api(`/api/perjanjian/${c3.id}/kirim`, { method: 'POST' });
+d1(`UPDATE pks_perjanjian SET tenggat='2026-01-01T00:00:00.000Z' WHERE id='${c3.id}'`);
+const cr = await api('/api/dev/cron', { method: 'POST' });
+ok(cr.ok && cr.log.some((l) => l.includes('telat')), 'cron kirim pengingat terlambat', JSON.stringify(cr));
+const cr2 = await api('/api/dev/cron', { method: 'POST' });
+ok(cr2.ok && !cr2.log.some((l) => l.includes(c3.id)) && cr2.log.filter((l) => l.includes('telat')).length === 0, 'pengingat tidak terkirim ganda');
+ok((await api(`/api/perjanjian/${c2.id}/batal`, { method: 'POST', body: { alasan: 'Email mitra belum tersedia' } })).ok, 'perjanjian dibatalkan dengan alasan');
+const dash = await api('/api/dashboard');
+ok(dash.kpi.berjalan === 1 && dash.kpi.telat === 1 && dash.kpi.selesai === 1 && dash.pipeline.length === 7, 'dashboard: KPI & pipeline sesuai', JSON.stringify(dash.kpi));
+ok(dash.tindakan.length === 1 && dash.aktivitas.length > 0, 'dashboard: tindakan & aktivitas');
+const ld = await api('/api/dashboard', { user: LEGAL });
+ok(ld.tindakan.length === 0, 'Legal hanya melihat antreannya (kosong)');
+const list = await api('/api/perjanjian?q=TRIZA');
+ok(list._json.length === 1 && list._json[0].tampil === 'terlambat', 'pencarian & status tampil "terlambat"');
+
+console.log(`\nHasil: ${pass} lulus, ${failN} gagal`);
+process.exit(failN ? 1 : 0);
