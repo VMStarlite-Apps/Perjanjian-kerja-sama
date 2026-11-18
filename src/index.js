@@ -6,6 +6,7 @@ import { listMitra, getMitra } from './lib/mitra.js';
 import { googleEnabled, gmailThreadReplies } from './lib/google.js';
 import { sendMail, templates } from './lib/mail.js';
 import * as F from './lib/flow.js';
+import { FIELDS, HALAMAN, batasKarakter } from './lib/template.js';
 
 const app = new Hono();
 
@@ -91,6 +92,12 @@ app.get('/api/meta', async (c) => {
   await user(c);
   const jenis = (await c.env.DB.prepare('SELECT kode, nama, masa_bulan FROM pks_jenis ORDER BY kode').all()).results;
   return c.json({ tahap: F.TAHAP, jenis });
+});
+
+// Daftar isian kuning pada template (satu-satunya bagian dokumen yang dapat diisi) dan batas panjangnya.
+app.get('/api/template', async (c) => {
+  await user(c);
+  return c.json({ fields: FIELDS, maks: await batasKarakter(), halaman: HALAMAN });
 });
 
 // ---------- Mitra (info perseroan, baca) ----------

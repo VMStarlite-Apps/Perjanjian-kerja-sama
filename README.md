@@ -78,3 +78,9 @@ Antarmuka (`public/`) disajikan di `https://vmstarlite-apps.github.io/Perjanjian
 - Portal mitra (`/portal.html`) tetap di Worker.
 - Pengaturan satu kali: repo → Settings → Pages → Source: **GitHub Actions** (repo harus Public pada akun gratis).
 - Mengganti alamat Worker: ubah `API_URL` di `pages.yml`.
+
+## Template dokumen
+
+Format perjanjian memakai `templates/pks-jasa.docx` (Perjanjian Pengadaan Jasa, 29 halaman). Hanya isian kuning yang dapat diisi (9 isian pada form; nomor surat dicetak otomatis oleh Legal) dan tanda tangan (halaman 19). Selebihnya terkunci.
+
+Bila template Word berubah: `python3 scripts/build-template.py` (butuh LibreOffice dan pdfplumber) membangun ulang `src/templates/pks-jasa.js` (PDF + posisi isian). Sesuaikan `POSISI_TTD` di `src/lib/template.js` bila blok tanda tangan pindah halaman.

@@ -244,6 +244,21 @@ dialog .df { padding: 12px 22px 20px; display: flex; justify-content: flex-end; 
   .track { grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 14px; }
 }
 @media (max-width: 560px) { .kpis { grid-template-columns: minmax(0, 1fr); } .who div { display: none; } .list li { grid-template-columns: 10px minmax(0, 1fr) auto; } .list li .time { display: none; } }
+/* Perpindahan layar: konten lama meredup saat memuat, konten baru masuk halus */
+.main { transition: opacity .16s ease; }
+.main.memuat { opacity: .45; pointer-events: none; }
+.main.masuk { animation: masuk .26s cubic-bezier(.2, .7, .2, 1) both; }
+@keyframes masuk { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+dialog[open] { animation: dialog-masuk .2s cubic-bezier(.2, .7, .2, 1); }
+dialog[open]::backdrop { animation: latar .2s ease; }
+@keyframes dialog-masuk { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes latar { from { opacity: 0; } to { opacity: 1; } }
+.tl li .node, .chip, .btn { transition: background-color .2s ease, color .2s ease, border-color .2s ease, transform .15s ease; }
+dialog { max-height: 92vh; overflow: hidden; }
+dialog form[data-f] { display: flex; flex-direction: column; max-height: 92vh; }
+dialog form[data-f] .db { overflow: auto; }
+.isian { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px 4px; margin: 0 0 14px; min-width: 0; }
+.isian legend { font-weight: 700; padding: 0 6px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 
 .bars.two .pair { display: flex; gap: 4px; align-items: flex-end; flex: 1; min-height: 0; width: 100%; justify-content: center; }

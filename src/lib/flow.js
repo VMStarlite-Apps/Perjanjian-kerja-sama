@@ -4,6 +4,7 @@ import { getMitra, snapshot } from './mitra.js';
 import { putFile, getFile } from './storage.js';
 import { pageCount, stampSignature } from './pdf.js';
 import { sendMail, templates } from './mail.js';
+import { buatMaster, cetakNomor, POSISI_TTD, HALAMAN } from './template.js';
 
 export const TAHAP = [
   { n: 0, key: 'draf', nama: 'Draf' },
@@ -137,8 +138,9 @@ export async function create(env, user, form) {
   if (judul.length < 3) fail(400, 'Judul perjanjian wajib diisi');
   const j = await env.DB.prepare('SELECT * FROM pks_jenis WHERE kode = ?').bind(jenis).first();
   if (!j) fail(400, 'Jenis perjanjian tidak dikenal');
-  const file = form.get('master');
-  checkFile(file, ['application/pdf']);
+  let isi;
+  try { isi = JSON.parse(String(form.get('isi') || '{}')); } catch { fail(400, 'Isian dokumen tidak valid'); }
+  const { bytes: masterBytes, isian } = await buatMaster(isi); // hanya isian kuning; sisanya terkunci pada template
   const m = await getMitra(env, mitraRow);
   const t = now();
   const seq = await env.DB.prepare("SELECT COUNT(*) + 1 AS n FROM pks_perjanjian WHERE substr(dibuat_pada,1,4) = ?").bind(t.slice(0, 4)).first();
@@ -147,8 +149,8 @@ export async function create(env, user, form) {
   await env.DB.prepare('INSERT INTO pks_perjanjian (id, kode, mitra_row, snapshot_mitra, jenis, judul, tahap, status, pic_vm, dibuat_pada, diperbarui_pada) VALUES (?,?,?,?,?,?,0,?,?,?,?)')
     .bind(p.id, kode, mitraRow, JSON.stringify(p.mitra), jenis, judul, 'draf', user.email, t, t).run();
   await env.DB.prepare('INSERT INTO pks_tahap (perjanjian_id, tahap, mulai, pic) VALUES (?,0,?,?)').bind(p.id, t, 'vm').run();
-  await audit(env, user.email, p.id, 'perjanjian_dibuat', { kode, mitra_row: mitraRow, jenis });
-  await addDoc(env, p, { jenis: 'master', name: `${kode} Master.pdf`, mime: 'application/pdf', bytes: await bytesOf(file), aktor: user.email });
+  await audit(env, user.email, p.id, 'perjanjian_dibuat', { kode, mitra_row: mitraRow, jenis, isian });
+  await addDoc(env, p, { jenis: 'master', name: `${kode} Master.pdf`, mime: 'application/pdf', bytes: masterBytes, aktor: user.email, halaman: HALAMAN });
   return p.id;
 }
 
@@ -206,12 +208,11 @@ export async function terbitNomor(env, user, id, form) {
   if (!cfg.formatNomor.test(nomor)) fail(400, 'Format nomor surat tidak sesuai ketentuan Legal');
   const dup = await env.DB.prepare('SELECT kode FROM pks_perjanjian WHERE nomor_surat = ? AND id != ?').bind(nomor, id).first();
   if (dup) fail(409, `Nomor surat sudah dipakai perjanjian ${dup.kode}`);
-  const file = form.get('dokumen');
-  checkFile(file, ['application/pdf']);
-  const bytes = await bytesOf(file);
+  // Nomor dicetak otomatis pada kolom "No." di dokumen master; dokumen tidak dapat diganti.
   const master = await latestDoc(env, id, 'master');
+  if (!master) fail(409, 'Dokumen master belum tersedia');
+  const bytes = await cetakNomor(await readDoc(env, master), nomor);
   const hal = await pageCount(bytes);
-  if (master?.halaman && hal !== master.halaman) fail(422, `Jumlah halaman (${hal}) berbeda dengan dokumen master (${master.halaman})`);
   await env.DB.prepare('UPDATE pks_perjanjian SET nomor_surat = ?, diperbarui_pada = ? WHERE id = ?').bind(nomor, now(), id).run();
   p.nomor_surat = nomor;
   await addDoc(env, p, { jenis: 'bernomor', name: `${p.kode} Bernomor.pdf`, mime: 'application/pdf', bytes, aktor: user.email, halaman: hal });
@@ -239,8 +240,8 @@ export async function bagikan(env, user, id) {
 
 // ---------------- Tahap 6 & 7: tanda tangan ----------------
 async function posisi(env, p, pihak) {
-  const j = await env.DB.prepare('SELECT posisi_ttd, masa_bulan FROM pks_jenis WHERE kode = ?').bind(p.jenis).first();
-  return { pos: JSON.parse(j.posisi_ttd)[pihak], masa: j.masa_bulan };
+  const j = await env.DB.prepare('SELECT masa_bulan FROM pks_jenis WHERE kode = ?').bind(p.jenis).first();
+  return { pos: POSISI_TTD[pihak], masa: j.masa_bulan };
 }
 async function sumberTtd(env, p, pihak) {
   const doc = pihak === 'mitra' ? await latestDoc(env, p.id, 'bernomor') : await latestDoc(env, p.id, 'ttd_mitra');

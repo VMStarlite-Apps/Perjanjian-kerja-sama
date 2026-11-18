@@ -47,12 +47,19 @@ await clickText('.picker button', 'DESNARUM');
 const sel = await page.$eval('[data-sel]', (e) => e.innerText);
 ok(sel.includes('desnarum.jayaakasha@gmail.com'), 'memilih mitra menampilkan email tujuan');
 ok((await page.$eval('#m-judul', (e) => e.value)).includes('DESNARUM'), 'judul terisi otomatis');
-const fi = await page.$('#m-file');
-await fi.uploadFile(resolve('test/fixtures/3hal.pdf'));
+ok(!(await page.$('#m-file')) && (await page.$$('[data-isi]')).length === 9, 'form memakai 9 isian kuning template, tanpa unggah dokumen');
+ok((await page.$eval('[data-isi="nama"]', (e) => e.value)).includes('DESNARUM'), 'isian nama perusahaan terisi dari info perseroan');
+await page.$eval('[data-isi="tanggal"]', (e) => { e.value = '2026-11-18'; e.dispatchEvent(new Event('input', { bubbles: true })); });
+for (const [k, v] of Object.entries({ domisili: 'Jakarta Barat', jabatan: 'Direktur', wakil: 'Budi Santoso', alamat: 'Jl. Uji No. 1, Jakarta', telp: '021 5551234', email: 'uji@desnarum.example', up: 'Siti - Legal' })) {
+  const el = await page.$(`[data-isi="${k}"]`);
+  if (!(await el.evaluate((e) => e.value))) await el.type(v);
+}
 await clickText('dialog button', 'Buat perjanjian');
 await page.waitForFunction(() => location.hash.startsWith('#/perjanjian/pks_'), { timeout: 15000 });
 await waitText('Kirim dokumen ke mitra');
 ok(true, 'perjanjian dibuat dan halaman detail terbuka');
+ok(await page.$eval('#app', (e) => e.classList.contains('masuk') && !e.classList.contains('memuat')), 'perpindahan layar selesai dengan animasi masuk');
+ok((await page.$$eval('.docs li', (l) => l.length)) === 1 && (await page.$eval('.docs', (e) => e.innerText)).includes('29 halaman'), 'dokumen master 29 halaman dibuat dari template');
 const detailUrl = page.url();
 
 console.log('\nKirim, tanggapan, Legal, bagikan (melalui tombol UI)');
@@ -68,7 +75,6 @@ await clickText('button', 'Serahkan ke Legal');
 await waitText('Terbitkan nomor surat');
 ok(true, 'diserahkan ke Legal (admin melihat form nomor)');
 await page.type('#no', NOMOR);
-await (await page.$('#no-file')).uploadFile(resolve('test/fixtures/3hal.pdf'));
 await clickText('button', 'Terbitkan nomor');
 await waitText('Bagikan perjanjian bernomor ke mitra');
 ok(true, 'nomor surat terbit lewat UI');
@@ -109,7 +115,7 @@ await clickText('button', 'Setujui tanda tangan');
 await waitText('Tanda tangan PT IJE');
 ok(true, 'TTD mitra disetujui, lanjut ke tahap PT IJE');
 await clickText('.seg-toggle button', 'Opsi 2');
-await (await page.$('#full')).uploadFile(resolve('test/fixtures/3hal.pdf'));
+await (await page.$('#full')).uploadFile(resolve('test/fixtures/29hal.pdf'));
 await clickText('button', 'Unggah dan selesaikan');
 await waitText('Perjanjian ditandatangani kedua pihak');
 ok(true, 'perjanjian selesai lewat UI');

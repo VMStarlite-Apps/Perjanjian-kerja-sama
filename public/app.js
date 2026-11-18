@@ -280,7 +280,8 @@ async function pagePerjanjian(params) {
 }
 
 // ---------- Buat perjanjian ----------
-function openCreate(preset) {
+async function openCreate(preset) {
+  try { S.tpl ||= await api('/api/template'); } catch (e) { return toast(e.message, true); }
   const dlg = document.createElement('dialog');
   dlg.innerHTML = `<form method="dialog" data-f>
     <div class="dh"><h2>Perjanjian baru</h2><button class="icon-btn" value="cancel" aria-label="Tutup" formnovalidate>✕</button></div>
@@ -288,7 +289,9 @@ function openCreate(preset) {
       <div class="field"><label for="m-q">Mitra</label><input class="input" id="m-q" placeholder="Ketik nama mitra" autocomplete="off"><div class="picker" role="listbox" aria-label="Pilihan mitra"></div><div class="hint" data-sel>Data diambil dari info perseroan.</div></div>
       <div class="field"><label for="m-jenis">Jenis perjanjian</label><select class="input" id="m-jenis" name="jenis">${S.meta.jenis.map((j) => `<option value="${esc(j.kode)}">${esc(j.nama)}</option>`).join('')}</select></div>
       <div class="field"><label for="m-judul">Judul</label><input class="input" id="m-judul" name="judul" required minlength="3"></div>
-      <div class="field"><label for="m-file">Dokumen perjanjian (PDF)</label><input class="input" id="m-file" name="master" type="file" accept="application/pdf" required><span class="hint">Dokumen yang sudah disiapkan. Isinya dikunci dan tidak dapat diubah di Starlite.</span></div>
+      <fieldset class="isian"><legend>Isian dokumen</legend><p class="hint" style="margin:0 0 10px">Dokumen memakai format Perjanjian Pengadaan Jasa. Hanya bagian kuning ini yang dapat diisi; isi lainnya terkunci. Nomor surat diterbitkan Legal.</p>
+        ${S.tpl.fields.map((f) => `<div class="field"><label for="i-${f.key}">${esc(f.label)}</label><input class="input" id="i-${f.key}" data-isi="${f.key}" ${f.type === 'date' ? 'type="date" min="2026-01-01" max="2026-12-31"' : `type="text" maxlength="${S.tpl.maks[f.key] || 120}" autocomplete="off"`} required>${f.hint ? `<span class="hint">${esc(f.hint)}</span>` : ''}</div>`).join('')}
+      </fieldset>
     </div>
     <div class="df"><button class="btn ghost" value="cancel" formnovalidate>Batal</button><button class="btn" value="ok" data-submit>Buat perjanjian</button></div></form>`;
   document.body.append(dlg); dlg.showModal();
@@ -299,6 +302,8 @@ function openCreate(preset) {
     chosen = m; qi.value = m.nama;
     $('[data-sel]', dlg).innerHTML = m.emails.length ? `Dikirim ke ${m.emails.map(esc).join(', ')}` : `<span style="color:var(--late);font-weight:600">Email mitra kosong di info perseroan. Perjanjian bisa dibuat, tetapi belum bisa dikirim.</span>`;
     if (!judul.value) judul.value = `${$('#m-jenis', dlg).selectedOptions[0].text} ${m.singkat || m.nama}`;
+    const pre = { nama: m.nama, direksi: m.direksi, alamat: m.alamat, telepon: m.telepon, email: m.emails?.[0], kontak_lain: m.kontak_lain };
+    S.tpl.fields.forEach((f) => { const el = $(`[data-isi="${f.key}"]`, dlg); if (el && f.prefill) el.value = String(pre[f.prefill] || '').slice(0, el.maxLength > 0 ? el.maxLength : 200); });
     pick.innerHTML = '';
   };
   const load = async (q) => {
@@ -314,6 +319,7 @@ function openCreate(preset) {
     if (!chosen) return toast('Pilih mitra terlebih dahulu', true);
     if (!f.reportValidity()) return;
     const fd = new FormData(f); fd.set('mitra_row', chosen.row);
+    fd.set('isi', JSON.stringify(Object.fromEntries($$('[data-isi]', dlg).map((el) => [el.dataset.isi, el.value]))));
     await busy(e.currentTarget, async () => { const r = await postForm('/api/perjanjian', fd); dlg.close(); toast('Perjanjian dibuat'); location.hash = `#/perjanjian/${r.id}`; });
   });
 }
@@ -377,8 +383,8 @@ function renderAction(p) {
       <label class="row small" style="margin-bottom:12px"><input type="checkbox" id="fb-setuju"> Mitra setuju tanpa catatan</label><button class="btn ghost" data-a="fb">Catat tanggapan</button></div></details>` : '');
   } else if (p.tahap === 3) {
     html = can('legal')
-      ? head('Tugas Legal', 'Terbitkan nomor surat', `Unggah PDF perjanjian yang sudah dibubuhi nomor. Jumlah halaman harus sama dengan dokumen master. Tenggat ${tgl(p.tenggat)}.`)
-        + `<div class="field"><label for="no">Nomor surat</label><input class="input" id="no" placeholder="Contoh: 001/PKS/IJE/XI/2026"></div><div class="field"><label for="no-file">PDF bernomor</label><input class="input" id="no-file" type="file" accept="application/pdf"></div><button class="btn" data-a="nomor">Terbitkan nomor</button>`
+      ? head('Tugas Legal', 'Terbitkan nomor surat', `Nomor dicetak otomatis pada kolom No. di halaman pertama dokumen. Tenggat ${tgl(p.tenggat)}.`)
+        + `<div class="field"><label for="no">Nomor surat</label><input class="input" id="no" placeholder="Contoh: 001/PKS/IJE/XI/2026"></div><button class="btn" data-a="nomor">Terbitkan nomor</button>`
       : head('Di Legal', 'Menunggu nomor surat dari Legal', `Tenggat ${tgl(p.tenggat)}.`);
   } else if (p.tahap === 4) {
     html = head('Langkah berikutnya', 'Bagikan perjanjian bernomor ke mitra', `Mitra menerima PDF No. ${esc(p.nomor_surat)} dan tautan untuk mengunggah tanda tangan.`)
@@ -417,7 +423,7 @@ function renderAction(p) {
   doIt('[data-a="kirim"]', () => post(`/api/perjanjian/${p.id}/kirim`), 'Dokumen dikirim ke mitra');
   doIt('[data-a="legal"]', () => post(`/api/perjanjian/${p.id}/legal`), 'Diserahkan ke Legal');
   doIt('[data-a="fb"]', () => post(`/api/perjanjian/${p.id}/feedback`, { isi: $('#fb-isi').value, setuju: $('#fb-setuju').checked }), 'Tanggapan dicatat');
-  doIt('[data-a="nomor"]', () => { const fd = new FormData(); fd.set('nomor_surat', $('#no').value); if ($('#no-file').files[0]) fd.set('dokumen', $('#no-file').files[0]); return postForm(`/api/perjanjian/${p.id}/nomor`, fd); }, 'Nomor surat terbit');
+  doIt('[data-a="nomor"]', () => { const fd = new FormData(); fd.set('nomor_surat', $('#no').value); return postForm(`/api/perjanjian/${p.id}/nomor`, fd); }, 'Nomor surat terbit');
   doIt('[data-a="bagikan"]', () => post(`/api/perjanjian/${p.id}/bagikan`), 'Perjanjian dibagikan ke mitra');
   doIt('[data-a="setujui"]', () => post(`/api/perjanjian/${p.id}/ttd-mitra/review`, { setuju: true }), 'Tanda tangan mitra disetujui');
   doIt('[data-a="tolak"]', () => post(`/api/perjanjian/${p.id}/ttd-mitra/review`, { setuju: false, alasan: $('#alasan').value }), 'Permintaan unggah ulang dikirim');
@@ -487,7 +493,7 @@ async function openMitra(row) {
   document.body.append(dlg); dlg.showModal();
   dlg.addEventListener('close', () => dlg.remove());
   $$('[data-x]', dlg).forEach((x) => x.addEventListener('click', () => dlg.close()));
-  $('[data-n]', dlg)?.addEventListener('click', () => { dlg.close(); openCreate({ row: m.row, nama: m.nama, singkat: m.singkat, emails: m.emails }); });
+  $('[data-n]', dlg)?.addEventListener('click', () => { dlg.close(); openCreate(m); });
 }
 
 // ---------- Pengaturan ----------
@@ -547,7 +553,10 @@ async function route() {
   const parts = path.split('/').filter(Boolean);
   const key = parts[0] || 'home';
   renderNav(key);
-  app.innerHTML = '<div class="skeleton"></div>';
+  // Konten lama tetap tampil (meredup) selama data dimuat; kerangka muncul hanya bila lambat. Lalu konten baru masuk halus.
+  const nomorRute = (route.n = (route.n || 0) + 1);
+  app.classList.remove('masuk'); app.classList.add('memuat');
+  const lambat = setTimeout(() => { if (route.n === nomorRute) app.innerHTML = '<div class="skeleton"></div>'; }, 350);
   try {
     if (key === 'home') await pageDashboard();
     else if (key === 'perjanjian' && parts[1]) await pageDetail(parts[1]);
@@ -558,8 +567,12 @@ async function route() {
   } catch (e) {
     app.innerHTML = `<div class="card"><div class="empty"><b>Halaman gagal dimuat</b>${esc(e.message)}<div style="margin-top:12px"><button class="btn ghost" onclick="location.reload()">Muat ulang</button></div></div></div>`;
   }
+  clearTimeout(lambat);
+  if (route.n !== nomorRute) return;
+  app.classList.remove('memuat');
+  void app.offsetWidth; app.classList.add('masuk');
   app.focus({ preventScroll: true });
-  window.scrollTo(0, 0);
+  window.scrollTo({ top: 0 });
 }
 
 // Dokumen diambil lewat API (butuh token), lalu dibuka di tab baru.

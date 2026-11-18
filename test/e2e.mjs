@@ -59,16 +59,21 @@ const pad = mitra._json.find((m) => m.row === 241);
 ok(pad && pad.emails.length === 1, 'format <alamat> tidak menggandakan email');
 
 console.log('\nTahap 0 — buat perjanjian');
-const master = await pdf(2, 'PERJANJIAN KERJA SAMA JASA');
-ok((await api('/api/perjanjian', { method: 'POST', form: { mitra_row: 94, judul: 'PKS Jasa FTTH', master: new Blob(['bukan pdf'], { type: 'text/plain' }) } })).status === 400, 'master bukan PDF ditolak');
-ok((await api('/api/perjanjian', { method: 'POST', user: MGMT, form: { mitra_row: 94, judul: 'x', master } })).status === 403, 'peran Manajemen tidak bisa membuat perjanjian');
-const c1 = await api('/api/perjanjian', { method: 'POST', form: { mitra_row: 94, jenis: 'PKS', judul: 'Perjanjian Kerja Sama Jasa FTTH 2026', master } });
+const ISI = { tanggal: '2026-11-18', nama: 'PT DESNARUM UJI', domisili: 'Jakarta Selatan', wakil: 'Budi Santoso', jabatan: 'Direktur', alamat: 'Jl. Uji Coba No. 1, Jakarta', telp: '021 5551234', email: 'legal@desnarum.example', up: 'Siti - Legal' };
+const isi = (o = {}) => JSON.stringify({ ...ISI, ...o });
+const tpl = await api('/api/template');
+ok(tpl.status === 200 && tpl.fields.length === 9 && tpl.halaman === 29 && tpl.maks.nama > 20, 'daftar isian template (9 isian kuning, 29 halaman)');
+ok((await api('/api/perjanjian', { method: 'POST', form: { mitra_row: 94, judul: 'PKS Jasa FTTH', isi: isi({ nama: 'X'.repeat(80) }) } })).status === 400, 'isian terlalu panjang untuk kolom template ditolak');
+ok((await api('/api/perjanjian', { method: 'POST', form: { mitra_row: 94, judul: 'PKS Jasa FTTH', isi: isi({ tanggal: '2027-01-05' }) } })).status === 400, 'tanggal di luar tahun template ditolak');
+ok((await api('/api/perjanjian', { method: 'POST', form: { mitra_row: 94, judul: 'PKS Jasa FTTH', isi: isi({ wakil: '' }) } })).status === 400, 'isian kosong ditolak');
+ok((await api('/api/perjanjian', { method: 'POST', user: MGMT, form: { mitra_row: 94, judul: 'x', isi: isi() } })).status === 403, 'peran Manajemen tidak bisa membuat perjanjian');
+const c1 = await api('/api/perjanjian', { method: 'POST', form: { mitra_row: 94, jenis: 'PKS', judul: 'Perjanjian Kerja Sama Jasa FTTH 2026', isi: isi() } });
 ok(c1.status === 201 && c1.id, 'perjanjian dibuat', JSON.stringify(c1));
 const id = c1.id;
 let det = await api(`/api/perjanjian/${id}`);
-ok(det.tahap === 0 && det.dokumen.length === 1 && det.dokumen[0].halaman === 2 && det.dokumen[0].sha256.length === 64, 'master tersimpan dengan hash & jumlah halaman');
+ok(det.tahap === 0 && det.dokumen.length === 1 && det.dokumen[0].halaman === 29 && det.dokumen[0].sha256.length === 64, 'master tersimpan dengan hash & jumlah halaman');
 
-const c2 = await api('/api/perjanjian', { method: 'POST', form: { mitra_row: 400, judul: 'PKS Lentera', master } });
+const c2 = await api('/api/perjanjian', { method: 'POST', form: { mitra_row: 400, judul: 'PKS Lentera', isi: isi() } });
 const k2 = await api(`/api/perjanjian/${c2.id}/kirim`, { method: 'POST' });
 ok(k2.status === 422 && /Email/.test(k2.error), 'kirim ke mitra tanpa email ditolak dengan pesan jelas', JSON.stringify(k2));
 
@@ -86,7 +91,7 @@ const pv = await api('/api/portal', { token: tFeedback });
 ok(pv.status === 200 && pv.bisa_feedback && !pv.bisa_ttd, 'portal mitra terbuka untuk tanggapan');
 const dl = await api('/api/portal/dokumen', { token: tFeedback, raw: true });
 ok(dl.status === 200 && (await dl.arrayBuffer()).byteLength > 500, 'mitra dapat mengunduh dokumen');
-ok((await api('/api/portal/ttd', { method: 'POST', token: tFeedback, form: { opsi: '2', berkas: master } })).status === 403, 'token tanggapan tidak bisa dipakai untuk TTD');
+ok((await api('/api/portal/ttd', { method: 'POST', token: tFeedback, form: { opsi: '2', berkas: await pdf(29, 'scan') } })).status === 403, 'token tanggapan tidak bisa dipakai untuk TTD');
 await api('/api/portal/feedback', { method: 'POST', token: tFeedback, body: { nama: 'Budi (Direktur)', isi: 'Mohon pasal 5 tentang termin pembayaran dijelaskan.' } });
 await api('/api/portal/feedback', { method: 'POST', token: tFeedback, body: { setuju: true } });
 det = await api(`/api/perjanjian/${id}`);
@@ -95,10 +100,9 @@ ok(det.tahap === 2 && det.feedback.length === 2 && det.feedback[1].setuju === 1,
 console.log('\nTahap 3–4 — Legal & nomor surat');
 ok((await api(`/api/perjanjian/${id}/legal`, { method: 'POST', user: LEGAL })).status === 403, 'Legal tidak bisa menyerahkan ke dirinya');
 ok((await api(`/api/perjanjian/${id}/legal`, { method: 'POST' })).ok, 'diserahkan ke Legal');
-ok((await api(`/api/perjanjian/${id}/nomor`, { method: 'POST', user: LEGAL, form: { nomor_surat: '001/PKS/IJE/XI/2026', dokumen: await pdf(3, 'X') } })).status === 422, 'PDF bernomor beda jumlah halaman ditolak');
-ok((await api(`/api/perjanjian/${id}/nomor`, { method: 'POST', user: LEGAL, form: { nomor_surat: 'x', dokumen: await pdf(2, 'X') } })).status === 400, 'format nomor tidak valid ditolak');
-const bernomor = await pdf(2, 'PERJANJIAN No. 001/PKS/IJE/XI/2026');
-const n1 = await api(`/api/perjanjian/${id}/nomor`, { method: 'POST', user: LEGAL, form: { nomor_surat: '001/PKS/IJE/XI/2026', dokumen: bernomor } });
+ok((await api(`/api/perjanjian/${id}/nomor`, { method: 'POST', user: LEGAL, form: { nomor_surat: 'x' } })).status === 400, 'format nomor tidak valid ditolak');
+ok((await api(`/api/perjanjian/${id}/nomor`, { method: 'POST', user: LEGAL, form: { nomor_surat: 'N'.repeat(70) } })).status === 400, 'nomor terlalu panjang untuk kolom template ditolak');
+const n1 = await api(`/api/perjanjian/${id}/nomor`, { method: 'POST', user: LEGAL, form: { nomor_surat: '001/PKS/IJE/XI/2026' } });
 ok(n1.ok, 'Legal menerbitkan nomor', JSON.stringify(n1));
 
 console.log('\nTahap 5 — bagikan ke mitra');
@@ -121,7 +125,7 @@ ok((await api(`/api/perjanjian/${id}/ttd-mitra/review`, { method: 'POST', body: 
 const rj = await api(`/api/perjanjian/${id}/ttd-mitra/review`, { method: 'POST', body: { setuju: false, alasan: 'Meterai tidak terlihat jelas pada scan' } });
 ok(rj.ok && rj.portal, 'VM menolak TTD, tautan unggah ulang terkirim');
 const tTtd2 = tokenOf(rj.portal);
-ok((await api('/api/portal/ttd', { method: 'POST', token: tTtd2, form: { opsi: '2', berkas: await pdf(2, 'SCAN BERTANDA TANGAN') } })).ok, 'opsi 2: scan dokumen penuh diunggah');
+ok((await api('/api/portal/ttd', { method: 'POST', token: tTtd2, form: { opsi: '2', berkas: await pdf(29, 'SCAN BERTANDA TANGAN') } })).ok, 'opsi 2: scan dokumen penuh diunggah');
 ok((await api(`/api/perjanjian/${id}/ttd-mitra/review`, { method: 'POST', body: { setuju: true } })).ok, 'VM menyetujui TTD mitra');
 det = await api(`/api/perjanjian/${id}`);
 const ttdDocs = det.dokumen.filter((d) => d.jenis === 'ttd_mitra');
@@ -137,7 +141,7 @@ const final = det.dokumen.find((d) => d.jenis === 'final');
 const fr = await api(`/api/dokumen/${final.id}`, { raw: true });
 const finalBytes = new Uint8Array(await fr.arrayBuffer());
 writeFileSync('test/out/final.pdf', finalBytes);
-ok((await PDFDocument.load(finalBytes)).getPageCount() === 2, 'dokumen final terbaca, 2 halaman');
+ok((await PDFDocument.load(finalBytes)).getPageCount() === 29, 'dokumen final terbaca, 29 halaman');
 ok(det.email.some((e) => e.tipe === 'final'), 'salinan final dikirim ke mitra');
 ok((await api(`/api/perjanjian/${id}/batal`, { method: 'POST', body: { alasan: 'uji batal setelah final' } })).status === 409, 'perjanjian final tidak bisa dibatalkan');
 
@@ -153,7 +157,7 @@ ok(tam.status === 409 && /tidak sesuai/.test(tam.error), 'berkas diubah di luar 
 ok(det.audit.length >= 15, `audit log lengkap (${det.audit.length} entri)`);
 
 console.log('\nKoreksi alur, pengingat, dashboard');
-const c3 = await api('/api/perjanjian', { method: 'POST', form: { mitra_row: 336, judul: 'PKS Triza', master } });
+const c3 = await api('/api/perjanjian', { method: 'POST', form: { mitra_row: 336, judul: 'PKS Triza', isi: isi() } });
 await api(`/api/perjanjian/${c3.id}/kirim`, { method: 'POST' });
 ok((await api(`/api/perjanjian/${c3.id}/mundur`, { method: 'POST', body: { ke: 0, alasan: '' } })).status === 400, 'pengembalian tanpa alasan ditolak');
 ok((await api(`/api/perjanjian/${c3.id}/mundur`, { method: 'POST', body: { ke: 0, alasan: 'Lampiran salah, kirim ulang' } })).ok, 'tahap dikembalikan dengan alasan');
