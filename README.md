@@ -68,3 +68,13 @@ node test/ui.mjs              # UI di Chrome nyata (27), butuh wrangler dev + Ch
 ## Pengguna
 
 Admin awal tersimpan di migrasi 0001 sebagai `vendormanagement@pmosurge.co.id`; ganti ke email yang dipakai: `UPDATE pks_pengguna SET email='<email-baru>' WHERE email='vendormanagement@pmosurge.co.id';` (jalankan sebelum masuk pertama). Tambahkan VM, Legal, Manajemen, dan penandatangan di menu Pengaturan.
+
+## Antarmuka di GitHub Pages
+
+Antarmuka (`public/`) disajikan di `https://vmstarlite-apps.github.io/Perjanjian-kerja-sama/` oleh `.github/workflows/pages.yml`. Data, login, email, dan Drive tetap lewat API Worker (`APP_URL`).
+
+- Login dari Pages memakai token sesi di header `Authorization` (tanpa cookie lintas situs), disimpan di `sessionStorage`.
+- `CORS_ORIGIN` di `wrangler.toml` menentukan origin yang boleh memanggil API; `UI_URL` dipakai untuk tautan internal di email.
+- Portal mitra (`/portal.html`) tetap di Worker.
+- Pengaturan satu kali: repo → Settings → Pages → Source: **GitHub Actions** (repo harus Public pada akun gratis).
+- Mengganti alamat Worker: ubah `API_URL` di `pages.yml`.

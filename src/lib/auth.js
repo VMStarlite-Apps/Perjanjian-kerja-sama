@@ -10,6 +10,12 @@ const KUNCI_MENIT = 15;
 const enc = new TextEncoder();
 const secure = (env) => env.APP_ENV !== 'dev';
 
+/** Token sesi: header Authorization: Bearer (frontend di domain lain) atau cookie (frontend satu domain). */
+const ambilToken = (c) => {
+  const h = c.req.header('authorization') || '';
+  return /^Bearer /i.test(h) ? h.slice(7).trim() : getCookie(c, COOKIE);
+};
+
 export async function buatSesi(c, email) {
   const token = randomToken(32);
   const t = Date.now();
@@ -17,10 +23,11 @@ export async function buatSesi(c, email) {
   await c.env.DB.prepare('INSERT INTO pks_sesi (id, email, dibuat_pada, kedaluwarsa) VALUES (?,?,?,?)')
     .bind(await sha256Hex(token), email, new Date(t).toISOString(), new Date(t + SESI_JAM * 3600_000).toISOString()).run();
   setCookie(c, COOKIE, token, { httpOnly: true, secure: secure(c.env), sameSite: 'Lax', path: '/', maxAge: SESI_JAM * 3600 });
+  return token;
 }
 
 export async function akhiriSesi(c) {
-  const token = getCookie(c, COOKIE);
+  const token = ambilToken(c);
   if (token) await c.env.DB.prepare('DELETE FROM pks_sesi WHERE id = ?').bind(await sha256Hex(token)).run();
   deleteCookie(c, COOKIE, { path: '/', secure: secure(c.env) });
 }
@@ -29,7 +36,7 @@ export const cabutSemuaSesi = (env, email, kecuali = null) =>
   env.DB.prepare('DELETE FROM pks_sesi WHERE email = ? AND id != ?').bind(email, kecuali || '').run();
 
 export async function sesiSaatIni(c) {
-  const token = getCookie(c, COOKIE);
+  const token = ambilToken(c);
   return token ? sha256Hex(token) : null;
 }
 

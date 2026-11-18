@@ -224,6 +224,23 @@ ok(kunci.status === 429, 'akun terkunci setelah 5 kali gagal (walau password ben
 d1("UPDATE pks_pengguna SET terkunci_sampai = NULL, gagal_login = 0 WHERE email = 'direksi.uji@pmosurge.co.id'");
 ok((await login(korban, PW)).status === 200, 'kunci terbuka setelah masa tunggu');
 
+// Frontend di domain lain (GitHub Pages): CORS + token Bearer
+const PAGES = 'https://vmstarlite-apps.github.io';
+const pre = await fetch(BASE + '/api/login', { method: 'OPTIONS', headers: { origin: PAGES, 'access-control-request-method': 'POST', 'access-control-request-headers': 'authorization,content-type' } });
+ok(pre.status === 204 && pre.headers.get('access-control-allow-origin') === PAGES && /authorization/.test(pre.headers.get('access-control-allow-headers')), 'preflight dari GitHub Pages diizinkan');
+const preAsing = await fetch(BASE + '/api/login', { method: 'OPTIONS', headers: { origin: 'https://situs-lain.example', 'access-control-request-method': 'POST' } });
+ok(preAsing.status === 403 && !preAsing.headers.get('access-control-allow-origin'), 'preflight dari origin lain ditolak');
+const lp = await login(ADMIN, PW, { origin: PAGES });
+const lpj = await lp.json();
+ok(lp.status === 200 && lp.headers.get('access-control-allow-origin') === PAGES && typeof lpj.token === 'string' && lpj.token.length >= 32, 'login dari Pages: CORS benar + token dikembalikan');
+const bearer = (path, init = {}) => fetch(BASE + path, { ...init, headers: { origin: PAGES, authorization: `Bearer ${lpj.token}`, ...(init.headers || {}) } });
+const mb = await bearer('/api/me');
+ok(mb.status === 200 && (await mb.json()).peran === 'admin' && mb.headers.get('access-control-allow-origin') === PAGES, 'sesi Bearer dikenali');
+ok((await bearer('/api/admin/pengguna/reset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status !== 403, 'POST dari origin Pages tidak ditolak CSRF');
+ok((await fetch(BASE + '/api/me', { headers: { origin: PAGES, authorization: 'Bearer salah' } })).status === 401, 'token Bearer salah ditolak');
+const kel = await bearer('/api/logout', { method: 'POST' });
+ok(kel.status === 200 && (await bearer('/api/me')).status === 401, 'keluar dengan Bearer mencabut sesi');
+
 // Keluar
 const out = await withCookie(ck, '/api/logout', { method: 'POST' });
 ok(out.status === 200 && (await withCookie(ck, '/api/me')).status === 401, 'keluar: sesi dihapus di server');

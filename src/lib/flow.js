@@ -1,5 +1,5 @@
 // Inti alur perjanjian Starlite (tahap 0–7 + pasca-selesai).
-import { now, uid, sha256Hex, randomToken, addWorkdays, addMonths, fail } from './util.js';
+import { now, uid, sha256Hex, randomToken, addWorkdays, addMonths, fail, uiUrl } from './util.js';
 import { getMitra, snapshot } from './mitra.js';
 import { putFile, getFile } from './storage.js';
 import { pageCount, stampSignature } from './pdf.js';
@@ -192,7 +192,7 @@ export async function keLegal(env, user, id) {
   const tenggat = await setTahap(env, p, 3, user.email);
   const legal = (await env.DB.prepare("SELECT email FROM pks_pengguna WHERE peran = 'legal' AND aktif = 1").all()).results.map((r) => r.email);
   if (legal.length) {
-    await sendMail(env, { perjanjianId: id, tipe: 'legal', to: legal, ...templates.legal({ p, m: p.mitra, tenggat, appUrl: env.APP_URL }) }).catch(() => {});
+    await sendMail(env, { perjanjianId: id, tipe: 'legal', to: legal, ...templates.legal({ p, m: p.mitra, tenggat, appUrl: uiUrl(env) }) }).catch(() => {});
   }
   await audit(env, user.email, id, 'diserahkan_ke_legal', { legal });
 }
@@ -218,7 +218,7 @@ export async function terbitNomor(env, user, id, form) {
   await setTahap(env, p, 4, user.email, `Nomor ${nomor}`);
   await audit(env, user.email, id, 'nomor_terbit', { nomor_surat: nomor });
   const pic = await env.DB.prepare('SELECT email FROM pks_pengguna WHERE email = ?').bind(p.pic_vm).first();
-  if (pic) await sendMail(env, { perjanjianId: id, tipe: 'nomor', to: [pic.email], ...templates.nomor({ p, m: p.mitra, appUrl: env.APP_URL }) }).catch(() => {});
+  if (pic) await sendMail(env, { perjanjianId: id, tipe: 'nomor', to: [pic.email], ...templates.nomor({ p, m: p.mitra, appUrl: uiUrl(env) }) }).catch(() => {});
 }
 
 // ---------------- Tahap 5: bagikan ----------------

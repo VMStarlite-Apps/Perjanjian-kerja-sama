@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { HttpError, now, fail, escapeHtml } from './lib/util.js';
+import { HttpError, now, fail, escapeHtml, uiUrl } from './lib/util.js';
 import { requireUser, allow, cekLogin, buatSesi, akhiriSesi, cabutSemuaSesi, sesiSaatIni } from './lib/auth.js';
 import { hashPassword, verifyPassword, passwordSementara, passwordValid, POLA_PASSWORD } from './lib/password.js';
 import { listMitra, getMitra } from './lib/mitra.js';
@@ -21,12 +21,27 @@ app.use('/api/*', async (c, next) => {
   c.header('x-content-type-options', 'nosniff');
 });
 
-// Perlindungan CSRF: permintaan yang mengubah data harus berasal dari origin yang sama.
+// CORS: frontend boleh dihosting di domain lain (mis. GitHub Pages) hanya bila origin-nya terdaftar di CORS_ORIGIN.
+// Tanpa cookie lintas situs: sesi memakai header Authorization, jadi tidak ada risiko CSRF dari situs lain.
+const originBoleh = (env, o) => !!o && String(env.CORS_ORIGIN || '').split(',').map((x) => x.trim().replace(/\/$/, '')).filter(Boolean).includes(o);
 app.use('/api/*', async (c, next) => {
-  if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
-    const o = c.req.header('origin');
-    if (o && new URL(o).host !== new URL(c.req.url).host) return c.json({ error: 'Permintaan ditolak (origin tidak cocok)' }, 403);
+  const o = c.req.header('origin');
+  const boleh = originBoleh(c.env, o);
+  if (boleh) {
+    c.header('access-control-allow-origin', o);
+    c.header('vary', 'Origin');
+    c.header('access-control-expose-headers', 'content-disposition');
   }
+  if (c.req.method === 'OPTIONS') {
+    if (!boleh) return c.body(null, 403);
+    c.header('access-control-allow-methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+    c.header('access-control-allow-headers', 'authorization,content-type,x-portal-token');
+    c.header('access-control-max-age', '600');
+    return c.body(null, 204);
+  }
+  // Perlindungan CSRF: permintaan yang mengubah data harus berasal dari origin yang sama atau origin terdaftar.
+  if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && o && !boleh && new URL(o).host !== new URL(c.req.url).host)
+    return c.json({ error: 'Permintaan ditolak (origin tidak cocok)' }, 403);
   await next();
 });
 
@@ -44,9 +59,9 @@ app.post('/api/login', async (c) => {
   let email;
   try { email = await cekLogin(c.env, b.email, b.password); }
   catch (err) { await F.audit(c.env, String(b.email || '').slice(0, 120).toLowerCase(), null, 'login_gagal'); throw err; }
-  await buatSesi(c, email);
+  const token = await buatSesi(c, email);
   await F.audit(c.env, email, null, 'login');
-  return c.json({ ok: true });
+  return c.json({ ok: true, token });
 });
 
 app.post('/api/logout', async (c) => {
@@ -340,7 +355,7 @@ app.post('/api/portal/ttd', async (c) => {
   const f = await c.req.formData();
   await F.unggahTtdMitra(c.env, p, String(f.get('opsi')), f.get('berkas'), `mitra:${p.mitra_row}`, false);
   const pic = await c.env.DB.prepare('SELECT email FROM pks_pengguna WHERE email = ? AND aktif = 1').bind(p.pic_vm).first();
-  if (pic) await sendMail(c.env, { perjanjianId: p.id, tipe: 'ttd_masuk', to: [pic.email], subject: `[Starlite] TTD mitra masuk — ${p.nomor_surat}`, html: `<p>${escapeHtml(p.mitra.nama)} mengunggah tanda tangan untuk perjanjian ${escapeHtml(p.nomor_surat)}. Mohon diperiksa di Starlite: ${escapeHtml(c.env.APP_URL)}/#/perjanjian/${p.id}</p>` }).catch(() => {});
+  if (pic) await sendMail(c.env, { perjanjianId: p.id, tipe: 'ttd_masuk', to: [pic.email], subject: `[Starlite] TTD mitra masuk — ${p.nomor_surat}`, html: `<p>${escapeHtml(p.mitra.nama)} mengunggah tanda tangan untuk perjanjian ${escapeHtml(p.nomor_surat)}. Mohon diperiksa di Starlite: ${escapeHtml(uiUrl(c.env))}/#/perjanjian/${p.id}</p>` }).catch(() => {});
   return c.json({ ok: true });
 });
 
@@ -383,7 +398,7 @@ export async function scheduled(env) {
       const ke = p.tahap === 3
         ? (await env.DB.prepare("SELECT email FROM pks_pengguna WHERE peran='legal' AND aktif=1").all()).results.map((x) => x.email)
         : [p.pic_vm];
-      if (ke.length) await sendMail(env, { perjanjianId: p.id, tipe: 'pengingat', to: ke, ...templates.pengingat_internal({ p, m: p.mitra, tahapNama: F.TAHAP[p.tahap].nama, tenggat: p.tenggat, telat, appUrl: env.APP_URL }) });
+      if (ke.length) await sendMail(env, { perjanjianId: p.id, tipe: 'pengingat', to: ke, ...templates.pengingat_internal({ p, m: p.mitra, tahapNama: F.TAHAP[p.tahap].nama, tenggat: p.tenggat, telat, appUrl: uiUrl(env) }) });
       await env.DB.prepare('INSERT INTO pks_pengingat (perjanjian_id, tahap, jenis, dikirim_pada) VALUES (?,?,?,?)').bind(p.id, p.tahap, jenis, t).run();
       log.push(`pengingat ${jenis} ${p.kode}`);
     } catch (e) { console.error('pengingat', p.id, e.message); }
@@ -397,7 +412,7 @@ export async function scheduled(env) {
     const done = await env.DB.prepare('SELECT 1 FROM pks_pengingat WHERE perjanjian_id = ? AND tahap = 7 AND jenis = ?').bind(p.id, jenis).first();
     if (done) continue;
     try {
-      await sendMail(env, { perjanjianId: p.id, tipe: 'berakhir', to: [p.pic_vm], ...templates.berakhir({ p, m: p.mitra, hari, appUrl: env.APP_URL }) });
+      await sendMail(env, { perjanjianId: p.id, tipe: 'berakhir', to: [p.pic_vm], ...templates.berakhir({ p, m: p.mitra, hari, appUrl: uiUrl(env) }) });
       await env.DB.prepare('INSERT INTO pks_pengingat (perjanjian_id, tahap, jenis, dikirim_pada) VALUES (?,7,?,?)').bind(p.id, jenis, t).run();
       log.push(`${jenis} ${p.kode}`);
     } catch (e) { console.error('berakhir', p.id, e.message); }

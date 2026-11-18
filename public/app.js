@@ -7,8 +7,16 @@ const app = $('#app');
 const S = { me: null, meta: null };
 
 // ---------- API ----------
+// Frontend boleh di domain lain (GitHub Pages): window.STARLITE_API berisi alamat Worker, kosong bila satu domain.
+// Sesi dikirim lewat header Authorization (tanpa cookie lintas situs); token disimpan di sessionStorage.
+const BASE = String(window.STARLITE_API || '').replace(/\/$/, '');
+const TKEY = 'starlite_token';
+const tokenGet = () => { try { return sessionStorage.getItem(TKEY); } catch { return null; } };
+const tokenSet = (t) => { try { t ? sessionStorage.setItem(TKEY, t) : sessionStorage.removeItem(TKEY); } catch {} };
 async function api(path, opts = {}) {
-  const r = await fetch(path, { credentials: 'same-origin', ...opts });
+  const t = tokenGet();
+  const headers = { ...(opts.headers || {}), ...(t ? { authorization: `Bearer ${t}` } : {}) };
+  const r = await fetch(BASE + path, { credentials: BASE ? 'omit' : 'same-origin', ...opts, headers });
   const ct = r.headers.get('content-type') || '';
   if (r.ok && ct.includes('application/pdf')) return r.blob();
   const j = await r.json().catch(() => ({}));
@@ -98,7 +106,7 @@ function shell(tampil) { $('.side').hidden = !tampil; $('.shell').classList.togg
 function showLogin(pesan = '') {
   shell(false);
   app.innerHTML = `<div class="login"><form class="card login-card" data-login novalidate>
-    <img src="/logo.png" alt="" class="login-logo"><h1>Masuk ke Starlite</h1><p class="muted">Pemantauan perjanjian kerja sama mitra</p>
+    <img src="logo.png" alt="" class="login-logo"><h1>Masuk ke Starlite</h1><p class="muted">Pemantauan perjanjian kerja sama mitra</p>
     <p class="login-err" role="alert" data-err>${esc(pesan)}</p>
     <div class="field"><label for="l-email">Email</label><input class="input" id="l-email" name="email" type="email" autocomplete="username" required autofocus></div>
     <div class="field"><label for="l-pw">Password</label><input class="input" id="l-pw" name="password" type="password" autocomplete="current-password" required></div>
@@ -109,7 +117,7 @@ function showLogin(pesan = '') {
     const err = $('[data-err]');
     err.textContent = '';
     busy($('button', f), async () => {
-      try { await post('/api/login', { email: f.email.value, password: f.password.value }); }
+      try { const r = await post('/api/login', { email: f.email.value, password: f.password.value }); tokenSet(r.token); }
       catch (ex) { err.textContent = ex.message; f.password.value = ''; f.password.focus(); return; }
       await mulai();
     });
@@ -152,6 +160,7 @@ function bukaGanti(wajib) {
 }
 async function keluar() {
   try { await post('/api/logout'); } catch {}
+  tokenSet(null);
   S.me = null; showLogin('Anda sudah keluar.');
 }
 function tampilkanPassword(email, password) {
@@ -323,7 +332,7 @@ async function pageDetail(id) {
   }).join('');
   const docs = p.dokumen.length ? `<ul class="list docs">${p.dokumen.map((d) => `<li><span class="fi">${ic('file')}</span><div style="min-width:0"><div class="t">${esc(JENIS_DOK[d.jenis])}, versi ${d.versi}</div><div class="s">${tgl(d.dibuat_pada)} oleh ${esc(aktor(d.pengunggah, d.pengunggah_nama))}${d.halaman ? `, ${d.halaman} halaman` : ''} <span class="hash" title="SHA-256 ${esc(d.sha256)}">#${esc(d.sha256.slice(0, 10))}</span></div></div>
     <span>${d.penanda ? `<span class="chip ${d.penanda === 'scan_asli' ? 'c-ok' : 'c-info'}">${d.penanda === 'scan_asli' ? 'Scan asli' : 'Hasil tempel'}</span>` : ''} ${d.status !== 'aktif' ? `<span class="chip ${d.status === 'tidak_sesuai' ? 'c-late' : d.status === 'menunggu_review' ? 'c-warn' : 'c-idle'}">${{ tidak_sesuai: 'Tidak sesuai', menunggu_review: 'Menunggu review', ditolak: 'Ditolak' }[d.status]}</span>` : ''}</span>
-    <a class="btn ghost sm" href="/api/dokumen/${d.id}" target="_blank" rel="noopener">${ic('download')}Buka</a></li>`).join('')}</ul>` : '<div class="empty">Belum ada dokumen</div>';
+    <a class="btn ghost sm" href="#" data-dok="${d.id}">${ic('download')}Buka</a></li>`).join('')}</ul>` : '<div class="empty">Belum ada dokumen</div>';
   const fb = p.feedback.length ? p.feedback.map((f) => `<div class="fb ${f.setuju ? 'agree' : ''}"><div class="small"><b>Putaran ${f.putaran}</b> <span class="muted">dari ${esc(f.pengirim || 'mitra')} via ${esc(f.sumber)}, ${jam(f.diterima_pada)}</span></div><p>${esc(f.isi)}</p></div>`).join('') : '<div class="empty">Belum ada tanggapan mitra</div>';
   app.innerHTML = `<div class="crumb"><a href="#/perjanjian">Perjanjian</a> / ${esc(p.kode)}</div>
     ${topbar(esc(m.nama), `${esc(p.judul)}`)}
@@ -378,7 +387,7 @@ function renderAction(p) {
     const rev = p.dokumen.find((d) => d.jenis === 'ttd_mitra' && d.status === 'menunggu_review');
     if (rev && can('vm')) {
       html = head('Perlu diperiksa', 'Periksa tanda tangan mitra', `Mitra mengunggah ${rev.penanda === 'scan_asli' ? 'scan dokumen lengkap' : 'tanda tangan yang ditempel ke dokumen'}. Pastikan tanda tangan, stempel, dan meterai terlihat jelas.`)
-        + `<iframe class="pdf-frame" src="/api/dokumen/${rev.id}#page=999&view=FitH" title="Dokumen bertanda tangan mitra"></iframe>
+        + `<iframe class="pdf-frame" data-pdf="${rev.id}" title="Dokumen bertanda tangan mitra"></iframe>
         <div class="row" style="margin-top:14px"><button class="btn ok" data-a="setujui">${ic('check')}Setujui tanda tangan</button></div>
         <div class="field" style="margin-top:16px"><label for="alasan">Alasan bila diminta unggah ulang</label><textarea class="input" id="alasan" placeholder="Misal: meterai tidak terlihat jelas"></textarea></div><button class="btn danger" data-a="tolak">Minta unggah ulang</button>`;
     } else {
@@ -394,7 +403,7 @@ function renderAction(p) {
   } else if (p.tahap === 7) {
     const fin = p.dokumen.find((d) => d.jenis === 'final');
     html = head('Selesai', 'Perjanjian ditandatangani kedua pihak', `Berlaku ${tgl(p.tgl_efektif)} sampai ${tgl(p.tgl_berakhir)}. Pengingat perpanjangan dikirim H-90, H-60, dan H-30.`)
-      + (fin ? `<a class="btn" href="/api/dokumen/${fin.id}" target="_blank" rel="noopener">${ic('download')}Unduh dokumen final</a>` : '');
+      + (fin ? `<a class="btn" href="#" data-dok="${fin.id}">${ic('download')}Unduh dokumen final</a>` : '');
   }
   if (can('vm') && p.status !== 'batal' && p.tahap < 7 && p.tahap > 0) {
     html += `<details class="more" style="margin-top:20px;padding-top:14px;border-top:1px solid var(--line)"><summary>Koreksi alur</summary><div style="margin-top:12px">
@@ -403,6 +412,7 @@ function renderAction(p) {
       <div class="row"><button class="btn ghost" data-a="mundur">Kembalikan tahap</button><button class="btn danger" data-a="batal">Batalkan perjanjian</button></div></div></details>`;
   }
   box.innerHTML = html;
+  $$('iframe[data-pdf]', box).forEach(async (fr) => { try { const b = await api(`/api/dokumen/${fr.dataset.pdf}`); fr.src = URL.createObjectURL(b) + '#page=999&view=FitH'; } catch (e) { toast(e.message, true); } });
 
   doIt('[data-a="kirim"]', () => post(`/api/perjanjian/${p.id}/kirim`), 'Dokumen dikirim ke mitra');
   doIt('[data-a="legal"]', () => post(`/api/perjanjian/${p.id}/legal`), 'Diserahkan ke Legal');
@@ -551,6 +561,16 @@ async function route() {
   app.focus({ preventScroll: true });
   window.scrollTo(0, 0);
 }
+
+// Dokumen diambil lewat API (butuh token), lalu dibuka di tab baru.
+document.addEventListener('click', async (e) => {
+  const a = e.target.closest('[data-dok]');
+  if (!a) return;
+  e.preventDefault();
+  const w = window.open('', '_blank');
+  try { const b = await api(`/api/dokumen/${a.dataset.dok}`); const u = URL.createObjectURL(b); if (w) w.location = u; else location.href = u; }
+  catch (ex) { w?.close(); toast(ex.message, true); }
+});
 
 async function mulai() {
   try {

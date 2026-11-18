@@ -63,3 +63,6 @@ export const fail = (status, message) => { throw new HttpError(status, message);
 export function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+
+/** Alamat antarmuka untuk tautan internal di email (UI_URL bila frontend di domain lain, selain itu APP_URL). Tautan portal mitra tetap memakai APP_URL. */
+export const uiUrl = (env) => String(env.UI_URL || env.APP_URL).replace(/\/$/, '');
