@@ -30,7 +30,7 @@ APP_ENV = "production"
 APP_URL = "https://starlite.hsans-din.workers.dev"
 # Antarmuka di GitHub Pages: tautan internal di email mengarah ke sini; portal mitra tetap di APP_URL.
 UI_URL = "https://vmstarlite-apps.github.io/Perjanjian-kerja-sama"
-CORS_ORIGIN = "https://vmstarlite-apps.github.io"
+CORS_ORIGIN = "https://vmstarlite-apps.github.io,https://vendormanagementstarlite-cyber.github.io"
 DRIVE_ROOT_FOLDER = "1vJu2toTDvc6-ReOtxPgd-RP_ckBUw6dp"
 MAIL_FROM = "vendor.management@weave.co.id"
 # ACCESS_TEAM_DOMAIN = "<tim>.cloudflareaccess.com"
