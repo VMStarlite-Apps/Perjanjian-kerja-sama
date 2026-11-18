@@ -285,7 +285,8 @@ app.post('/api/overview/kirim-sekaligus', async (c) => {
   const u = await user(c); allow(u);
   const b = await json(c);
   const rows = Array.isArray(b.rows) ? b.rows.map(Number).filter(Boolean) : null;
-  return c.json({ ok: true, ...(await F.kirimInnerCity(c.env, u, { rows, batas: Number(b.batas) || 4 })) });
+  const lewati = Array.isArray(b.lewati) ? b.lewati.map(Number).filter(Boolean).slice(0, 500) : [];
+  return c.json({ ok: true, ...(await F.kirimInnerCity(c.env, u, { rows, batas: Number(b.batas) || 4, lewati })) });
 });
 app.post('/api/overview/arsip-semua', async (c) => {
   const u = await user(c); allow(u);

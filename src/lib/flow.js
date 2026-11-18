@@ -416,10 +416,11 @@ export async function arsipUlang(env, user, id) {
 // ---------------- Kirim sekaligus (Inner City) ----------------
 // Membuat draf + mengirim ke mitra memakai format email di Pengaturan. Diproses per kelompok kecil agar tidak melewati batas waktu Worker.
 // Isian yang tidak ada di info perseroan (domisili, jabatan) diisi "-"/"Direktur"; mitra melengkapinya lewat tautan (bagian kuning).
-export async function kirimInnerCity(env, user, { rows = null, batas = 4 } = {}) {
+export async function kirimInnerCity(env, user, { rows = null, batas = 4, lewati = [] } = {}) {
+  const skip = new Set((Array.isArray(lewati) ? lewati : []).map(Number));
   const sudah = new Set((await env.DB.prepare("SELECT DISTINCT mitra_row FROM pks_perjanjian WHERE status != 'batal'").all()).results.map((r) => r.mitra_row));
   const target = (await env.DB.prepare("SELECT source_row, nama_acuan FROM pks_mitra_kelompok WHERE kelompok = 'inner_city' ORDER BY nama_acuan").all()).results
-    .filter((r) => (!rows || rows.includes(r.source_row)) && !sudah.has(r.source_row));
+    .filter((r) => (!rows || rows.includes(r.source_row)) && !sudah.has(r.source_row) && !skip.has(r.source_row));
   const kerja = target.slice(0, Math.max(1, Math.min(10, batas)));
   const hari = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10);
   const hasil = [];

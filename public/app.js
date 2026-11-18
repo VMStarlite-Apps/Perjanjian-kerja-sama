@@ -555,7 +555,7 @@ async function pageOverview(params) {
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px">${OV_LANGKAH.map(([n, ts]) => { const j = d.pipeline.filter((x) => ts.includes(x.tahap)).reduce((a, x) => a + x.jumlah, 0); return `<div><div class="num" style="font-size:22px;font-weight:700">${j}</div><div style="height:8px;border-radius:4px;background:var(--line,#dfe5ee);margin:6px 0"><div style="height:100%;width:${Math.round((j / maks) * 100)}%;max-width:100%;border-radius:4px;background:${n === 'Selesai' ? 'var(--ok,#17885A)' : 'var(--blue,#2F9BEF)'}"></div></div><small class="muted">${esc(n)}</small></div>`; }).join('')}</div></div>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-bottom:16px;align-items:start">
       <div class="card"><div class="card-head"><h2>Perlu perhatian</h2></div>${perhatian.length ? `<ul class="list" style="list-style:none;padding:0;margin:0;display:grid;gap:10px">${perhatian.map((x) => `<li style="display:flex;justify-content:space-between;gap:8px"><a href="#/perjanjian/${x.id}">${esc(x.mitra)}<br><small class="muted">${esc(x.nomor_surat || x.kode)}</small></a><span class="chip ${OV_STATUS[x.status]?.[1] || 'c-late'}">${x.tahap < 7 && x.status !== 'berakhir' ? 'Lewat tenggat' : OV_STATUS[x.status][0]}${x.tgl_berakhir ? ' ' + tgl(x.tgl_berakhir) : ''}</span></li>`).join('')}</ul>` : '<p class="muted">Tidak ada yang perlu perhatian.</p>'}</div>
-      <div class="card"><div class="card-head"><h2>Inner City belum berperjanjian</h2><span class="muted">${belum.length} dari ${d.total}</span></div>${belum.length ? `<div style="max-height:260px;overflow:auto;display:grid;gap:6px">${belum.map((r) => `<div style="display:flex;justify-content:space-between;gap:8px">${esc(r.mitra?.nama || r.acuan)}<span style="display:flex;gap:6px;align-items:center"><span class="chip ${OV_STATUS[r.status][1]}" style="white-space:normal">${r.status === 'tidak_ketemu' ? 'Tidak di info perseroan' : 'Belum ada'}</span>${r.status === 'belum_ada' && r.mitra ? `<button class="btn ghost sm" data-satu="${r.mitra.row}" type="button">Kirim</button>` : ''}</span></div>`).join('')}</div>` : '<p class="muted">Semua mitra Inner City sudah punya perjanjian.</p>'}</div></div>
+      <div class="card"><div class="card-head"><h2>Inner City belum berperjanjian</h2><span class="muted">${belum.length} dari ${d.total}</span></div>${belum.length ? `<div style="max-height:260px;overflow:auto;display:grid;gap:6px">${belum.map((r) => `<div style="display:flex;justify-content:space-between;gap:8px">${esc(r.mitra?.nama || r.acuan)}<span style="display:flex;gap:6px;align-items:center"><span class="chip ${OV_STATUS[r.status][1]}" style="white-space:normal">${r.status === 'tidak_ketemu' ? 'Tidak di info perseroan' : 'Belum ada'}</span>${r.status === 'belum_ada' && r.mitra ? (r.mitra.ada_email === false ? '<span class="chip c-warn" title="Lengkapi email di info perseroan">Email kosong</span>' : `<button class="btn ghost sm" data-satu="${r.mitra.row}" type="button">Kirim</button>`) : ''}</span></div>`).join('')}</div>` : '<p class="muted">Semua mitra Inner City sudah punya perjanjian.</p>'}</div></div>
     <div class="card"><div class="card-head"><h2>Semua perjanjian dan progresnya</h2><span class="muted">${semua.length} perjanjian</span></div>
       <div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr style="text-align:left"><th>Mitra</th><th>Progres</th><th>Status</th><th>Nomor surat</th><th>Berakhir</th></tr></thead><tbody>${semua.map((x) => `<tr><td><a href="#/perjanjian/${x.id}">${esc(x.mitra)}</a>${x.inner_city ? '<br><small class="muted">Inner City</small>' : ''}</td><td>${ovStep(x.tahap)}</td><td><span class="chip ${OV_STATUS[x.status][1]}">${OV_STATUS[x.status][0]}</span></td><td>${esc(x.nomor_surat || '–')}</td><td>${x.tgl_berakhir ? tgl(x.tgl_berakhir) : '–'}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Belum ada perjanjian.</td></tr>'}</tbody></table></div></div>`;
   const go = () => { location.hash = q({ jenis: $('#ovj').value, kel: $('#ovk').value }); };
@@ -566,9 +566,10 @@ async function pageOverview(params) {
     route();
   }));
   const jalankan = async (rows, tombol) => {
-    let ok = 0; const gagal = [];
-    for (let guard = 0; guard < 20; guard++) {
-      const r = await post('/api/overview/kirim-sekaligus', { rows, batas: 4 });
+    let ok = 0; const gagal = []; const lewati = [];
+    for (let guard = 0; guard < 60; guard++) {
+      const r = await post('/api/overview/kirim-sekaligus', { rows, batas: 4, lewati });
+      r.hasil.forEach((h) => { if (!h.ok) lewati.push(h.row); });
       r.hasil.forEach((h) => (h.ok ? ok++ : gagal.push(`${h.nama}: ${h.galat}`)));
       if (!r.sisa) break;
       tombol.textContent = `Mengirim… ${ok} terkirim, sisa ${r.sisa}`;
@@ -577,9 +578,10 @@ async function pageOverview(params) {
     route();
   };
   $('[data-a="sekaligus"]').addEventListener('click', (e) => {
-    const n = d.daftar.filter((r) => r.status === 'belum_ada').length;
-    if (!n) { toast('Tidak ada mitra Inner City yang belum berperjanjian', true); return; }
-    if (!confirm(`Buat dan kirim perjanjian ke ${n} mitra Inner City sekarang? Email memakai format di Pengaturan.`)) return;
+    const n = d.daftar.filter((r) => r.status === 'belum_ada' && r.mitra?.ada_email !== false).length;
+    const tanpa = d.daftar.filter((r) => r.status === 'belum_ada' && r.mitra?.ada_email === false).length;
+    if (!n) { toast(tanpa ? `${tanpa} mitra belum punya email di info perseroan. Lengkapi dulu.` : 'Tidak ada mitra Inner City yang belum berperjanjian', true); return; }
+    if (!confirm(`Buat dan kirim perjanjian ke ${n} mitra Inner City sekarang?${tanpa ? ` ${tanpa} mitra dilewati karena email kosong.` : ''} Email memakai format di Pengaturan.`)) return;
     busy(e.currentTarget, () => jalankan(null, e.currentTarget));
   });
   $$('[data-satu]').forEach((b) => b.addEventListener('click', () => { if (confirm('Buat dan kirim perjanjian ke mitra ini?')) busy(b, () => jalankan([Number(b.dataset.satu)], b)); }));

@@ -72,7 +72,7 @@ export async function overview(env, { jenis = '' } = {}) {
     const m = a.source_row ? mm.get(a.source_row) : null;
     const ps = rows.filter((r) => r.mitra_row === a.source_row);
     const p = ps.find((r) => r.tahap === 7) || ps[0] || null;
-    return { acuan: a.nama_acuan, catatan: a.catatan, mitra: m ? { row: m.row, nama: m.nama, jenis: m.jenis, status: m.status } : null, status: a.source_row ? statusKontrak(p, today) : 'tidak_ketemu', perjanjian: p ? { id: p.id, kode: p.kode, nomor_surat: p.nomor_surat, tahap: p.tahap, tgl_efektif: p.tgl_efektif, tgl_berakhir: p.tgl_berakhir } : null };
+    return { acuan: a.nama_acuan, catatan: a.catatan, mitra: m ? { row: m.row, nama: m.nama, jenis: m.jenis, status: m.status, ada_email: (m.emails || []).length > 0 } : null, status: a.source_row ? statusKontrak(p, today) : 'tidak_ketemu', perjanjian: p ? { id: p.id, kode: p.kode, nomor_surat: p.nomor_surat, tahap: p.tahap, tgl_efektif: p.tgl_efektif, tgl_berakhir: p.tgl_berakhir } : null };
   }).sort((a, b) => a.acuan.localeCompare(b.acuan));
   const hitung = {};
   for (const d of daftar) hitung[d.status] = (hitung[d.status] || 0) + 1;
