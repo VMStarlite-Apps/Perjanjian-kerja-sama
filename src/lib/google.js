@@ -34,6 +34,10 @@ export async function driveUpload(env, folderId, name, mime, bytes) {
   return (await bridge(env, 'drive_upload', { folderId, name, mime, b64: b64(bytes) })).id;
 }
 
+export async function driveArsip(env, mitra, name, mime, bytes) {
+  return bridge(env, 'drive_arsip', { mitra, name, mime, b64: b64(bytes) });
+}
+
 export async function driveDownload(env, fileId) {
   const { b64: data } = await bridge(env, 'drive_download', { id: fileId });
   return Uint8Array.from(atob(data), (c) => c.charCodeAt(0));

@@ -7,3 +7,6 @@
 /portal.html
   Referrer-Policy: no-referrer
   Cache-Control: no-store
+/legal.html
+  Referrer-Policy: no-referrer
+  Cache-Control: no-store

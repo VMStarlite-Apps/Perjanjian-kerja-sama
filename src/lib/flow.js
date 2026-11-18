@@ -1,9 +1,10 @@
 // Inti alur perjanjian Starlite (tahap 0–7 + pasca-selesai).
-import { now, uid, sha256Hex, randomToken, addWorkdays, addMonths, fail, uiUrl, escapeHtml } from './util.js';
+import { parseEmails, now, uid, sha256Hex, randomToken, addWorkdays, addMonths, fail, uiUrl, escapeHtml } from './util.js';
 import { getMitra, snapshot } from './mitra.js';
 import { putFile, getFile } from './storage.js';
+import { googleEnabled, driveArsip } from './google.js';
 import { pageCount, stampSignature } from './pdf.js';
-import { sendMail, templates } from './mail.js';
+import { sendMail, templates, emailKirim } from './mail.js';
 import { buatMaster, cetakNomor, POSISI_TTD, HALAMAN } from './template.js';
 
 // Status internal (tetap 0–7 agar data lama aman). Pengguna melihat 5 langkah sederhana (LANGKAH).
@@ -36,6 +37,7 @@ export async function konfig(env) {
     formatNomor: new RegExp(k.format_nomor || '^.{3,80}$'),
     tokenHari: Number(k.token_hari || 30),
     batchAwal: JSON.parse(k.batch_awal || '[]'),
+    email: { to: parseEmails(k.email_to_tambahan || ''), cc: parseEmails(k.email_cc || ''), subjek: k.email_subjek || '', badan: k.email_badan || '' },
   };
 }
 
@@ -108,16 +110,17 @@ export async function readDoc(env, doc) {
   return bytes;
 }
 
-async function issueToken(env, pid, tujuan) {
+export async function issueToken(env, pid, tujuan) {
   const cfg = await konfig(env);
   const raw = randomToken();
   const exp = new Date(Date.now() + cfg.tokenHari * 86400_000).toISOString();
   await env.DB.batch([
-    env.DB.prepare('UPDATE pks_token SET dicabut = 1 WHERE perjanjian_id = ?').bind(pid),
+    env.DB.prepare(tujuan === 'legal' ? "UPDATE pks_token SET dicabut = 1 WHERE perjanjian_id = ? AND tujuan = 'legal'" : "UPDATE pks_token SET dicabut = 1 WHERE perjanjian_id = ? AND tujuan != 'legal'").bind(pid),
     env.DB.prepare('INSERT INTO pks_token (token_hash, perjanjian_id, tujuan, kedaluwarsa, dibuat_pada) VALUES (?,?,?,?,?)').bind(await sha256Hex(raw), pid, tujuan, exp, now()),
   ]);
   return raw;
 }
+export const legalUrl = (env, raw) => `${env.APP_URL}/legal.html#t=${raw}`;
 const portalUrl = (env, raw) => `${env.APP_URL}/portal.html#t=${raw}`;
 
 export async function resolveToken(env, raw) {
@@ -195,10 +198,13 @@ export async function kirim(env, user, id) {
   const m = await refreshSnapshot(env, p);
   const master = await latestDoc(env, id, 'master');
   const bytes = await readDoc(env, master);
-  const tenggat = addWorkdays(now(), (await konfig(env)).sla['1'] || 5);
+  const cfg0 = await konfig(env);
+  const tenggat = addWorkdays(now(), cfg0.sla['1'] || 5);
   const raw = await issueToken(env, id, 'feedback');
-  const tpl = templates.kirim({ p, m, tenggat, url: portalUrl(env, raw) });
-  const res = await sendMail(env, { perjanjianId: id, tipe: 'kirim', to: m.emails, ...tpl, attachments: [{ name: master.nama, mime: 'application/pdf', bytes }] });
+  const cfg = cfg0;
+  const tpl = emailKirim({ p, m, tenggat, url: portalUrl(env, raw) }, cfg.email);
+  const to = [...new Set([...m.emails, ...cfg.email.to])];
+  const res = await sendMail(env, { perjanjianId: id, tipe: 'kirim', to, cc: cfg.email.cc.filter((x) => !to.includes(x)), ...tpl, attachments: [{ name: master.nama, mime: 'application/pdf', bytes }] });
   await env.DB.prepare('UPDATE pks_perjanjian SET gmail_thread_id = ?, gmail_last_check = ? WHERE id = ?').bind(res.threadId, now(), id).run();
   await setTahap(env, p, 1, user.email);
   await audit(env, user.email, id, 'dikirim_ke_mitra', { penerima: m.emails, mode: res.mode });
@@ -230,7 +236,8 @@ export async function keLegal(env, user, id) {
   const tenggat = await setTahap(env, p, 3, aktor);
   const legal = (await env.DB.prepare("SELECT email FROM pks_pengguna WHERE peran = 'legal' AND aktif = 1").all()).results.map((r) => r.email);
   if (legal.length) {
-    await sendMail(env, { perjanjianId: id, tipe: 'legal', to: legal, ...templates.legal({ p, m: p.mitra, tenggat, appUrl: uiUrl(env) }) }).catch(() => {});
+    const raw = await issueToken(env, id, 'legal');
+    await sendMail(env, { perjanjianId: id, tipe: 'legal', to: legal, ...templates.legal({ p, m: p.mitra, tenggat, url: legalUrl(env, raw) }) }).catch(() => {});
   }
   await audit(env, aktor, id, 'diserahkan_ke_legal', { legal });
 }
@@ -255,6 +262,7 @@ export async function terbitNomor(env, user, id, form) {
   await setTahap(env, p, 4, user.email, `Nomor ${nomor}`);
   await audit(env, user.email, id, 'nomor_terbit', { nomor_surat: nomor });
   const pic = await env.DB.prepare('SELECT email FROM pks_pengguna WHERE email = ?').bind(p.pic_vm).first();
+  await kabarLegal(env, p, 'nomor');
   // Langsung dibagikan ke mitra untuk TTD. Bila gagal (mis. email mitra kosong), VM dapat mengirim ulang dari aplikasi.
   try { return { otomatis: true, ...(await bagikan(env, user, id)) }; }
   catch (e) {
@@ -338,7 +346,7 @@ export async function reviewTtdMitra(env, user, id, { setuju, alasan }) {
   }
 }
 
-export async function ttdIje(env, user, id, form) {
+export async function ttdIje(env, user, id, form, ctx) {
   if (!user.penandatangan && user.peran !== 'admin') fail(403, 'Hanya penandatangan berwenang PT IJE yang dapat mengunggah TTD');
   const p = await loadP(env, id);
   need(p, 6);
@@ -365,9 +373,76 @@ export async function ttdIje(env, user, id, form) {
   await setTahap(env, p, 7, user.email, 'Ditandatangani kedua pihak');
   await env.DB.prepare('UPDATE pks_token SET dicabut = 1 WHERE perjanjian_id = ?').bind(id).run();
   await audit(env, user.email, id, 'perjanjian_selesai', { dokumen: doc.id, tgl_efektif: efektif, tgl_berakhir: berakhir });
-  await sendMail(env, { perjanjianId: id, tipe: 'final', to: p.mitra.emails, ...templates.final({ p, m: p.mitra }), attachments: [{ name: doc.nama, mime: 'application/pdf', bytes }], threadId: p.gmail_thread_id })
+  // Arsip Drive dan email ke mitra berjalan di latar belakang agar penandatangan tidak menunggu.
+  const arsip = arsipkan(env, user.email, p, doc, bytes).catch((e) => audit(env, 'sistem', id, 'arsip_gagal', { galat: e.message }));
+  if (ctx?.waitUntil) ctx.waitUntil(arsip); else await arsip;
+  const surel = sendMail(env, { perjanjianId: id, tipe: 'final', to: p.mitra.emails, ...templates.final({ p, m: p.mitra }), attachments: [{ name: doc.nama, mime: 'application/pdf', bytes }], threadId: p.gmail_thread_id })
     .catch((e) => audit(env, 'sistem', id, 'email_final_gagal', { galat: e.message }));
+  const kabar = arsip.then(() => kabarLegal(env, p, 'final'));
+  if (ctx?.waitUntil) { ctx.waitUntil(surel); ctx.waitUntil(kabar); } else { await surel; await kabar; }
   return doc.id;
+}
+
+
+// Arsip final: hanya dokumen yang sudah ditandatangani kedua pihak. Disalin ke folder bernama mitra
+// (langsung berkas, tanpa subfolder) dan tautannya membuka berkas itu. Gagal arsip tidak menggagalkan tahap.
+export async function arsipkan(env, aktor, p, doc, bytes) {
+  if (!googleEnabled(env)) return null;
+  const nama = String(doc.nama).replace(/[\\/:*?"<>|]+/g, ' ').trim();
+  const r = await driveArsip(env, p.mitra.nama, nama, 'application/pdf', bytes);
+  await env.DB.prepare('UPDATE pks_perjanjian SET arsip_url = ?, arsip_folder_url = ? WHERE id = ?').bind(r.url, r.folderUrl, p.id).run();
+  Object.assign(p, { arsip_url: r.url, arsip_folder_url: r.folderUrl });
+  await audit(env, aktor, p.id, 'diarsipkan', { berkas: r.id, folder: r.folderId });
+  return r;
+}
+
+// Kabar perkembangan perjanjian untuk Legal (email, tanpa login).
+export async function kabarLegal(env, p, kejadian) {
+  const legal = (await env.DB.prepare("SELECT email FROM pks_pengguna WHERE peran = 'legal' AND aktif = 1").all()).results.map((r) => r.email);
+  if (!legal.length) return;
+  await sendMail(env, { perjanjianId: p.id, tipe: 'legal_update', to: legal, ...templates.legalUpdate({ p, m: p.mitra, kejadian }) }).catch(() => {});
+}
+
+export async function arsipUlang(env, user, id) {
+  const p = await loadP(env, id);
+  if (p.tahap !== 7 || p.status === 'batal') fail(409, 'Hanya perjanjian yang sudah ditandatangani kedua pihak yang diarsipkan');
+  const doc = await latestDoc(env, id, 'final');
+  if (!doc) fail(404, 'Dokumen final tidak ditemukan');
+  const r = await arsipkan(env, user.email, p, doc, await readDoc(env, doc));
+  if (!r) fail(500, 'Kredensial Google Drive belum dipasang');
+  return { arsip_url: r.url, arsip_folder_url: r.folderUrl };
+}
+
+// ---------------- Kirim sekaligus (Inner City) ----------------
+// Membuat draf + mengirim ke mitra memakai format email di Pengaturan. Diproses per kelompok kecil agar tidak melewati batas waktu Worker.
+// Isian yang tidak ada di info perseroan (domisili, jabatan) diisi "-"/"Direktur"; mitra melengkapinya lewat tautan (bagian kuning).
+export async function kirimInnerCity(env, user, { rows = null, batas = 4 } = {}) {
+  const sudah = new Set((await env.DB.prepare("SELECT DISTINCT mitra_row FROM pks_perjanjian WHERE status != 'batal'").all()).results.map((r) => r.mitra_row));
+  const target = (await env.DB.prepare("SELECT source_row, nama_acuan FROM pks_mitra_kelompok WHERE kelompok = 'inner_city' ORDER BY nama_acuan").all()).results
+    .filter((r) => (!rows || rows.includes(r.source_row)) && !sudah.has(r.source_row));
+  const kerja = target.slice(0, Math.max(1, Math.min(10, batas)));
+  const hari = new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10);
+  const hasil = [];
+  for (const r of kerja) {
+    let nama = r.nama_acuan, id = null;
+    try {
+      const m = await getMitra(env, r.source_row);
+      nama = m.nama;
+      if (!m.emails.length) fail(422, 'Email mitra kosong di info perseroan');
+      const form = new FormData();
+      form.set('mitra_row', String(r.source_row)); form.set('jenis', 'PKS'); form.set('judul', `Perjanjian Kerja Sama ${m.nama}`);
+      form.set('isi', JSON.stringify({ tanggal: hari, nama: m.nama, domisili: '-', wakil: m.direksi || '-', jabatan: 'Direktur', alamat: m.alamat || '-', telp: m.telepon || '-', email: m.emails.join('; '), up: m.kontak_lain || '-' }));
+      id = await create(env, user, form);
+      await kirim(env, user, id);
+      hasil.push({ row: r.source_row, nama, ok: true, id });
+    } catch (e) {
+      hasil.push({ row: r.source_row, nama, ok: false, id, galat: e.message });
+    }
+  }
+  await audit(env, user.email, null, 'kirim_sekaligus', { diproses: hasil.length, gagal: hasil.filter((h) => !h.ok).length });
+  const gagalRow = new Set(hasil.filter((h) => !h.ok).map((h) => h.row));
+  // Yang gagal tidak dihitung "sisa" agar pengulangan di klien berhenti; dilaporkan terpisah.
+  return { hasil, sisa: target.filter((x) => !kerja.includes(x) && !gagalRow.has(x.source_row)).length };
 }
 
 // ---------------- Koreksi alur ----------------

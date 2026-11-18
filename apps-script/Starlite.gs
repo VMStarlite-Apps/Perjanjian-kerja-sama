@@ -87,6 +87,20 @@ const actions_ = {
     return { id: folder.createFile(blob).getId() };
   },
 
+  // Arsip final: berkas langsung di folder bernama mitra (di bawah folder induk), tanpa subfolder.
+  // Bila berkas bernama sama sudah ada, dipakai ulang (aman dipanggil berulang).
+  drive_arsip(p) {
+    const mitra = String(p.mitra || '').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120);
+    const name = String(p.name || '').trim();
+    if (!mitra || !name) throw new Error('nama mitra/berkas wajib');
+    const folder = ensureFolder_(DriveApp.getFolderById(root_()), mitra);
+    let file = null;
+    const it = folder.getFilesByName(name);
+    while (it.hasNext()) { const f = it.next(); if (!f.isTrashed()) { file = f; break; } }
+    if (!file) file = folder.createFile(Utilities.newBlob(Utilities.base64Decode(p.b64), p.mime || 'application/pdf', name));
+    return { id: file.getId(), url: 'https://drive.google.com/file/d/' + file.getId() + '/view', folderId: folder.getId(), folderUrl: 'https://drive.google.com/drive/folders/' + folder.getId() };
+  },
+
   drive_download(p) {
     const file = DriveApp.getFileById(p.id);
     if (!inRoot_(file)) throw new Error('berkas di luar folder induk');

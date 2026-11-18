@@ -71,3 +71,34 @@ test('password sementara: 12 karakter tanpa karakter ambigu; aturan minimal 10',
   assert.equal(passwordValid('123456789'), false);
   assert.equal(passwordValid('1234567890'), true);
 });
+
+import { INNER_CITY, inti, cocokkan, statusKontrak } from '../src/lib/kelompok.js';
+test('inner city: 36 nama unik, pencocokan inti nama (PT/CV/titik diabaikan), tidak menebak', () => {
+  assert.equal(INNER_CITY.length, 36); assert.equal(new Set(INNER_CITY).size, 36);
+  assert.equal(inti('PT. KRESA UTAMA MANDIRI'), 'KRESA UTAMA MANDIRI');
+  const mitra = [{ row: 1, nama: 'PT. KRESA UTAMA MANDIRI', singkat: 'KRESA' }, { row: 2, nama: 'CV TRIZA PRATAMA', singkat: '' }, { row: 3, nama: 'PT SARANA MANDIRI USAHA UNGGUL', singkat: '' }, { row: 4, nama: 'PT SARANA MANDIRI USAHA UNGGUL 2', singkat: '' }];
+  const h = cocokkan(['PT KRESA UTAMA MANDIRI', 'PT TRIZA PRATAMA', 'PT SARANA MANDIRI USAHA UNGGUL', 'PT TIDAK ADA'], mitra);
+  assert.deepEqual(h['PT KRESA UTAMA MANDIRI'].map((m) => m.row), [1]);
+  assert.deepEqual(h['PT TRIZA PRATAMA'].map((m) => m.row), [2]);
+  assert.deepEqual(h['PT SARANA MANDIRI USAHA UNGGUL'].map((m) => m.row), [3]);
+  assert.deepEqual(h['PT TIDAK ADA'], []);
+});
+test('status kontrak', () => {
+  const t = '2026-11-18';
+  assert.equal(statusKontrak(null, t), 'belum_ada');
+  assert.equal(statusKontrak({ tahap: 3 }, t), 'proses');
+  assert.equal(statusKontrak({ tahap: 7, tgl_berakhir: '2026-11-01' }, t), 'berakhir');
+  assert.equal(statusKontrak({ tahap: 7, tgl_berakhir: '2027-01-30' }, t), 'akan_berakhir');
+  assert.equal(statusKontrak({ tahap: 7, tgl_berakhir: '2027-12-31' }, t), 'aktif');
+});
+
+import { emailKirim } from '../src/lib/mail.js';
+test('format email: placeholder nama mitra, tautan, dan aman dari HTML', () => {
+  const ctx = { p: { kode: 'PKS-1', judul: 'Judul <b>' }, m: { nama: 'PT A & B' }, tenggat: '2026-12-01T00:00:00Z', url: 'https://x.test/p#t=abc' };
+  const d = emailKirim(ctx, {});
+  assert.match(d.subject, /PT A & B — PKS-1/);
+  assert.ok(d.html.includes('https://x.test/p#t=abc') && !d.html.includes('Judul <b>'));
+  const k = emailKirim(ctx, { subjek: 'Halo {nama_mitra}\nX', badan: 'Yth {nama_mitra}\n\nBuka {tautan} sekarang' });
+  assert.equal(k.subject, 'Halo PT A & B X');
+  assert.ok(k.html.includes('Yth PT A &amp; B') && k.html.includes('<a href="https://x.test/p#t=abc">'));
+});

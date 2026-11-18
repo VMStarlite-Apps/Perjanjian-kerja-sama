@@ -22,9 +22,15 @@ export const templates = {
 <p>Bersama ini kami sampaikan dokumen <b>${e(p.judul)}</b> untuk ditinjau. Mohon tanggapan paling lambat <b>${fmtTgl(tenggat)}</b>.</p>
 <p>Dokumen terlampir untuk Anda baca. Pada dokumen, hanya bagian berwarna kuning yang dapat diisi atau diubah, dan itu dilakukan melalui aplikasi dengan tautan di bawah, bukan dengan mengubah berkas. Tanggapan dan persetujuan juga disampaikan melalui tautan yang sama. Bila tidak ada catatan, pilih "Setuju tanpa catatan".</p>`, { url, label: 'Tinjau dokumen' }),
   }),
-  legal: ({ p, m, tenggat, appUrl }) => ({
+  legal: ({ p, m, tenggat, url }) => ({
     subject: `[Starlite] Mohon nomor surat — ${p.kode} ${m.nama}`,
-    html: layout(`<p>Perjanjian <b>${e(p.judul)}</b> dengan <b>${e(m.nama)}</b> telah disetujui mitra dan menunggu penerbitan nomor surat.</p><p>Tenggat: <b>${fmtTgl(tenggat)}</b>.</p>`, { url: `${appUrl}/#/perjanjian/${p.id}`, label: 'Buka perjanjian' }),
+    html: layout(`<p>Perjanjian <b>${e(p.judul)}</b> dengan <b>${e(m.nama)}</b> telah disetujui mitra dan menunggu penerbitan nomor surat.</p><p>Tenggat: <b>${fmtTgl(tenggat)}</b>.</p><p>Tidak perlu login. Buka tautan, masukkan PIN 4 angka (pertama kali: email dan nomor HP), lalu isi nomor surat.</p>`, { url, label: 'Isi nomor surat' }),
+  }),
+  legalUpdate: ({ p, m, kejadian }) => ({
+    subject: `[Starlite] ${kejadian === 'final' ? 'Perjanjian selesai' : 'Nomor surat terbit'} — ${p.nomor_surat || p.kode} ${m.nama}`,
+    html: layout(kejadian === 'final'
+      ? `<p>Perjanjian <b>No. ${e(p.nomor_surat)}</b> dengan <b>${e(m.nama)}</b> telah ditandatangani kedua pihak. Berlaku ${fmtTgl(p.tgl_efektif)} sampai ${fmtTgl(p.tgl_berakhir)}.</p>`
+      : `<p>Nomor <b>${e(p.nomor_surat)}</b> untuk perjanjian dengan <b>${e(m.nama)}</b> sudah tercatat dan dokumen diteruskan ke mitra untuk tanda tangan.</p>`, p.arsip_url && kejadian === 'final' ? { url: p.arsip_url, label: 'Buka arsip' } : null),
   }),
   nomor: ({ p, m, appUrl }) => ({
     subject: `[Starlite] Nomor surat terbit — ${p.nomor_surat}`,
@@ -57,6 +63,32 @@ export const templates = {
     html: layout(`<p>Perjanjian <b>No. ${e(p.nomor_surat)}</b> dengan <b>${e(m.nama)}</b> berakhir pada <b>${fmtTgl(p.tgl_berakhir)}</b>. Pertimbangkan perpanjangan atau addendum.</p>`, { url: `${appUrl}/#/perjanjian/${p.id}`, label: 'Buka perjanjian' }),
   }),
 };
+
+export const EMAIL_BAWAAN = {
+  subjek: 'Perjanjian Kerja Sama {nama_mitra} — {kode}',
+  badan: `Yth. Direksi {nama_mitra},
+
+Bersama ini kami sampaikan dokumen {judul} untuk ditinjau. Mohon tanggapan paling lambat {tenggat}.
+
+Dokumen terlampir untuk Anda baca. Pada dokumen, hanya bagian berwarna kuning yang dapat diisi atau diubah, dan itu dilakukan melalui aplikasi dengan tautan di bawah, bukan dengan mengubah berkas. Tanggapan dan persetujuan juga disampaikan melalui tautan yang sama. Bila tidak ada catatan, pilih "Setuju tanpa catatan".
+
+{tautan}`,
+};
+const isi = (s, v) => String(s).replace(/\{(nama_mitra|kode|judul|tenggat|tautan)\}/g, (_, k) => v[k] ?? '');
+
+/** Email kirim ke mitra dari format yang diatur di Pengaturan (subjek/badan dengan {nama_mitra}, {kode}, {judul}, {tenggat}, {tautan}). */
+export function emailKirim({ p, m, tenggat, url }, cfg = {}) {
+  const v = { nama_mitra: m.nama, kode: p.kode, judul: p.judul, tenggat: fmtTgl(tenggat), tautan: url };
+  const subject = isi(cfg.subjek || EMAIL_BAWAAN.subjek, v).replace(/[\r\n]+/g, ' ').slice(0, 250);
+  const badan = String(cfg.badan || EMAIL_BAWAAN.badan);
+  const bagian = badan.split(/\n{2,}/).map((x) => x.trim()).filter(Boolean).map((par) => {
+    if (par === '{tautan}') return { cta: true };
+    const h = e(isi(par.replace(/\{tautan\}/g, '\u0000'), { ...v })).replace(/\u0000/g, `<a href="${e(url)}">${e(url)}</a>`).replace(/\n/g, '<br>');
+    return { h: `<p>${h}</p>` };
+  });
+  const ada = bagian.some((b) => b.cta);
+  return { subject, html: layout(bagian.filter((b) => b.h).map((b) => b.h).join(''), ada || !/\{tautan\}/.test(badan) ? { url, label: 'Tinjau dokumen' } : null) };
+}
 
 /** Kirim email + catat log. Mengembalikan {threadId, messageId, mode}. */
 export async function sendMail(env, { perjanjianId, tipe, to, cc = [], subject, html, attachments = [], threadId }) {

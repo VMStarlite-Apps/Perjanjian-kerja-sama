@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFileSync } from 'node:fs';
-import { googleEnabled, drivePath, driveUpload, driveDownload, gmailSend, gmailThreadReplies } from '../src/lib/google.js';
+import { driveArsip, googleEnabled, drivePath, driveUpload, driveDownload, gmailSend, gmailThreadReplies } from '../src/lib/google.js';
 
 const ROOT = 'ROOT_ID';
 function makeGoogle() {
@@ -15,6 +15,7 @@ function makeGoogle() {
     getId: () => o.id, getName: () => o.name, isTrashed: () => !!o.trashed,
     getParents: () => { const l = o.parents.map((p) => wrap(items.get(p))); let i = 0; return { hasNext: () => i < l.length, next: () => l[i++] }; },
     getFoldersByName(name) { const l = [...items.values()].filter((x) => x.folder && x.parents.includes(o.id) && x.name === name).map(wrap); let i = 0; return { hasNext: () => i < l.length, next: () => l[i++] }; },
+    getFilesByName(name) { const l = [...items.values()].filter((x) => !x.folder && x.parents.includes(o.id) && x.name === name).map(wrap); let i = 0; return { hasNext: () => i < l.length, next: () => l[i++] }; },
     createFolder(name) { const id = 'F' + ++n; items.set(id, { id, name, parents: [o.id], folder: true }); return wrap(items.get(id)); },
     createFile(blob) { const id = 'X' + ++n; items.set(id, { id, name: blob.name, parents: [o.id], bytes: blob.bytes, mime: blob.mime }); return wrap(items.get(id)); },
     getBlob: () => ({ getBytes: () => o.bytes }),
@@ -156,4 +157,24 @@ test('galat server (5xx) diulang sampai 3 kali', async () => {
     await assert.rejects(drivePath({ APPS_SCRIPT_URL: 'u', APPS_SCRIPT_KEY: 'k' }, ['A']), /membalas tidak valid/);
     assert.equal(calls, 3);
   } finally { globalThis.fetch = real; }
+});
+
+test('driveArsip: folder bernama mitra, berkas langsung di dalamnya, tautan membuka berkas, idempoten', async () => {
+  const { g, items } = makeGoogle();
+  const restore = installFetch(g); const e = env(g);
+  try {
+    const r1 = await driveArsip(e, 'PT Contoh/Satu', 'PKS-1 Final 001.pdf', 'application/pdf', new Uint8Array([1, 2, 3]));
+    const fol = items.get(r1.folderId);
+    assert.equal(fol.name, 'PT Contoh Satu');
+    assert.deepEqual(fol.parents, [ROOT]);
+    const file = items.get(r1.id);
+    assert.deepEqual(file.parents, [r1.folderId]);
+    assert.equal(r1.url, 'https://drive.google.com/file/d/' + r1.id + '/view');
+    assert.equal(r1.folderUrl, 'https://drive.google.com/drive/folders/' + r1.folderId);
+    const r2 = await driveArsip(e, 'PT Contoh/Satu', 'PKS-1 Final 001.pdf', 'application/pdf', new Uint8Array([1, 2, 3]));
+    assert.equal(r2.id, r1.id); assert.equal(r2.folderId, r1.folderId);
+    const r3 = await driveArsip(e, 'PT Contoh/Satu', 'PKS-2 Final 002.pdf', 'application/pdf', new Uint8Array([9]));
+    assert.equal(r3.folderId, r1.folderId); assert.notEqual(r3.id, r1.id);
+    await assert.rejects(driveArsip(e, '', 'x.pdf', 'application/pdf', new Uint8Array([1])), /wajib/);
+  } finally { restore(); }
 });
