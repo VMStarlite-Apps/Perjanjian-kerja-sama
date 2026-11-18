@@ -45,7 +45,11 @@ async function load() {
   });
   const s2 = document.getElementById('s2');
   if (d.bisa_feedback) {
-    s2.innerHTML = `<h2>Sampaikan tanggapan</h2><p class="muted" style="margin:4px 0 12px">Tanggapan dicatat dan ditindaklanjuti tim kami. Bila tidak ada catatan, pilih "Setuju tanpa catatan".</p>
+    const isiHtml = d.isian ? `<details class="more" style="margin-bottom:18px"${''}><summary>Lengkapi atau ubah data (bagian kuning dokumen)</summary><div style="margin-top:12px">
+      <p class="muted small" style="margin:0 0 10px">Hanya bagian berwarna kuning pada dokumen yang dapat diubah. Setelah disimpan, dokumen diperbarui otomatis dan dapat diunduh ulang.</p>
+      ${d.isian.fields.map((f) => `<div class="field"><label for="i-${f.key}">${esc(f.label)}</label><input class="input" id="i-${f.key}" data-isi="${f.key}" ${f.type === 'date' ? 'type="date" min="2026-01-01" max="2026-12-31"' : `type="text" maxlength="${d.isian.maks[f.key] || 120}" autocomplete="off"`} value="${esc(d.isian.nilai[f.key])}">${f.hint ? `<span class="hint">${esc(f.hint)}</span>` : ''}</div>`).join('')}
+      <button class="btn ghost" id="simpan-isi">Simpan perubahan data</button></div></details>` : '';
+    s2.innerHTML = isiHtml + `<h2>Sampaikan tanggapan</h2><p class="muted" style="margin:4px 0 12px">Tanggapan dicatat dan ditindaklanjuti tim kami. Bila tidak ada catatan, pilih "Setuju tanpa catatan".</p>
       ${d.feedback.length ? `<div class="notice info small" style="margin-bottom:12px">${d.feedback.length} tanggapan sudah kami terima. Anda masih dapat menambahkan catatan.</div>` : ''}
       <div class="field"><label for="nm">Nama dan jabatan</label><input class="input" id="nm" placeholder="Misal: Budi Santoso, Direktur"></div>
       <div class="field"><label for="isi">Catatan atas dokumen</label><textarea class="input" id="isi" placeholder="Sebutkan pasal dan catatannya"></textarea></div>
@@ -57,6 +61,14 @@ async function load() {
         message(setuju ? 'Persetujuan diterima' : 'Tanggapan diterima', 'Tim Vendor Management akan menindaklanjuti dan mengirimkan dokumen bernomor melalui email.', true);
       } catch (e) { alert(e.message); btn.disabled = false; }
     };
+    document.getElementById('simpan-isi')?.addEventListener('click', async (e) => {
+      const b = e.currentTarget; b.disabled = true;
+      try {
+        const isi = Object.fromEntries([...document.querySelectorAll('[data-isi]')].map((el) => [el.dataset.isi, el.value]));
+        await api('/api/portal/isian', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ isi }) });
+        await load(); alert('Data tersimpan. Dokumen sudah diperbarui; silakan unduh ulang bila perlu.');
+      } catch (err) { alert(err.message); b.disabled = false; }
+    });
     document.getElementById('kirim').addEventListener('click', (e) => send(false, e.currentTarget));
     document.getElementById('setuju').addEventListener('click', (e) => send(true, e.currentTarget));
   } else if (d.bisa_ttd && d.menunggu_review) {

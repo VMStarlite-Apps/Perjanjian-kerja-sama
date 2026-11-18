@@ -100,6 +100,13 @@ app.get('/api/template', async (c) => {
   return c.json({ fields: FIELDS, maks: await batasKarakter(), halaman: HALAMAN });
 });
 
+app.get('/api/perjanjian/:id/isian', async (c) => { await user(c); return c.json(await F.isianTerkini(c.env, c.req.param('id'))); });
+app.post('/api/perjanjian/:id/isian', async (c) => {
+  const u = await user(c); allow(u, 'vm');
+  const p = await F.loadP(c.env, c.req.param('id'));
+  return c.json({ ok: true, ...(await F.ubahIsian(c.env, p, (await json(c)).isi || {}, u.email, 'vm')) });
+});
+
 // ---------- Mitra (info perseroan, baca) ----------
 app.get('/api/mitra', async (c) => {
   await user(c);
@@ -324,11 +331,19 @@ app.get('/api/portal', async (c) => {
   const doc = await F.latestDoc(c.env, p.id, docJenis);
   const review = await F.latestDoc(c.env, p.id, 'ttd_mitra', 'menunggu_review');
   const feedback = (await c.env.DB.prepare('SELECT putaran, isi, setuju, diterima_pada FROM pks_feedback WHERE perjanjian_id = ? ORDER BY diterima_pada').bind(p.id).all()).results;
+  const bisaIsian = [1, 2].includes(p.tahap) && token.tujuan === 'feedback';
   return c.json({
+    isian: bisaIsian ? { nilai: await F.isianTerkini(c.env, p.id), fields: FIELDS, maks: await batasKarakter() } : null,
     tujuan: token.tujuan, kode: p.kode, judul: p.judul, nomor_surat: p.nomor_surat, tahap: p.tahap, tahap_nama: F.TAHAP[p.tahap].nama,
     tenggat: p.tenggat, mitra: { nama: p.mitra.nama }, dokumen: doc ? { id: doc.id, nama: doc.nama, halaman: doc.halaman } : null,
     menunggu_review: !!review, feedback, bisa_feedback: [1, 2].includes(p.tahap) && token.tujuan === 'feedback', bisa_ttd: p.tahap === 5 && token.tujuan === 'ttd',
   });
+});
+
+app.post('/api/portal/isian', async (c) => {
+  const { token, p } = await portal(c);
+  if (token.tujuan !== 'feedback') fail(403, 'Tautan ini tidak dapat mengubah isian dokumen');
+  return c.json({ ok: true, ...(await F.ubahIsian(c.env, p, (await json(c)).isi || {}, `mitra:${p.mitra_row}`, 'mitra')) });
 });
 
 app.get('/api/portal/dokumen', async (c) => {

@@ -62,6 +62,15 @@ ok(await page.$eval('#app', (e) => e.classList.contains('masuk') && !e.classList
 ok((await page.$$eval('.docs li', (l) => l.length)) === 1 && (await page.$eval('.docs', (e) => e.innerText)).includes('29 halaman'), 'dokumen master 29 halaman dibuat dari template');
 const detailUrl = page.url();
 
+await clickText('button', 'Ubah isian dokumen');
+await page.waitForSelector('dialog [data-isi="jabatan"]');
+ok((await page.$eval('dialog [data-isi="jabatan"]', (e) => e.value)) === 'Direktur', 'dialog ubah isian memuat nilai terkini');
+await page.$eval('dialog [data-isi="jabatan"]', (e) => { e.value = ''; });
+await page.type('dialog [data-isi="jabatan"]', 'Direktur Utama');
+await clickText('dialog button', 'Simpan isian');
+await page.waitForFunction(() => document.querySelectorAll('.docs li').length === 2, { timeout: 10000 });
+ok(true, 'isian kuning diubah lewat aplikasi: dokumen master versi 2 tampil');
+
 console.log('\nKirim, tanggapan, Legal, bagikan (melalui tombol UI)');
 await clickText('button', 'Kirim ke mitra');
 await waitText('Menunggu tanggapan mitra');

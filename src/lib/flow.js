@@ -1,5 +1,5 @@
 // Inti alur perjanjian Starlite (tahap 0–7 + pasca-selesai).
-import { now, uid, sha256Hex, randomToken, addWorkdays, addMonths, fail, uiUrl } from './util.js';
+import { now, uid, sha256Hex, randomToken, addWorkdays, addMonths, fail, uiUrl, escapeHtml } from './util.js';
 import { getMitra, snapshot } from './mitra.js';
 import { putFile, getFile } from './storage.js';
 import { pageCount, stampSignature } from './pdf.js';
@@ -152,6 +152,31 @@ export async function create(env, user, form) {
   await audit(env, user.email, p.id, 'perjanjian_dibuat', { kode, mitra_row: mitraRow, jenis, isian });
   await addDoc(env, p, { jenis: 'master', name: `${kode} Master.pdf`, mime: 'application/pdf', bytes: masterBytes, aktor: user.email, halaman: HALAMAN });
   return p.id;
+}
+
+// ---------------- Isian kuning (satu-satunya bagian dokumen yang dapat diubah) ----------------
+/** Isian terakhir yang tertanam di dokumen master (dari jejak audit), termasuk tanggal asli. */
+export async function isianTerkini(env, id) {
+  const r = await env.DB.prepare("SELECT data FROM pks_audit WHERE perjanjian_id = ? AND aksi IN ('perjanjian_dibuat','isian_diubah') ORDER BY id DESC LIMIT 1").bind(id).first();
+  const isian = r ? JSON.parse(r.data || '{}').isian : null;
+  if (!isian) fail(404, 'Isian dokumen tidak ditemukan');
+  return { ...isian, tanggal: `2026-${isian.mm}-${isian.dd}` };
+}
+
+/** Buat ulang dokumen master dari template dengan isian baru (versi baru). Hanya sebelum nomor surat terbit. */
+export async function ubahIsian(env, p, isi, aktor, sumber) {
+  need(p, 0, 1, 2);
+  const lama = await isianTerkini(env, p.id);
+  const { bytes, isian } = await buatMaster(isi);
+  const berubah = Object.keys(isian).filter((k) => isian[k] !== lama[k] && k !== 'tanggal');
+  if (!berubah.length) fail(400, 'Tidak ada isian yang berubah');
+  await addDoc(env, p, { jenis: 'master', name: `${p.kode} Master.pdf`, mime: 'application/pdf', bytes, aktor, halaman: HALAMAN });
+  await audit(env, aktor, p.id, 'isian_diubah', { isian, berubah, sumber });
+  if (sumber === 'mitra') {
+    const pic = await env.DB.prepare('SELECT email FROM pks_pengguna WHERE email = ? AND aktif = 1').bind(p.pic_vm).first();
+    if (pic) await sendMail(env, { perjanjianId: p.id, tipe: 'isian', to: [pic.email], subject: `[Starlite] ${p.mitra.nama} memperbarui isian dokumen`, html: `<p>${escapeHtml(p.mitra.nama)} memperbarui isian dokumen perjanjian ${escapeHtml(p.kode)} melalui aplikasi: ${berubah.map(escapeHtml).join(', ')}. Dokumen master versi baru sudah dibuat. Periksa di: ${escapeHtml(uiUrl(env))}/#/perjanjian/${escapeHtml(p.id)}</p>` }).catch(() => {});
+  }
+  return { berubah };
 }
 
 // ---------------- Tahap 1: kirim ----------------

@@ -20,7 +20,7 @@ export const templates = {
     subject: `Perjanjian Kerja Sama ${m.nama} — ${p.kode}`,
     html: layout(`<p>Yth. Direksi ${e(m.nama)},</p>
 <p>Bersama ini kami sampaikan dokumen <b>${e(p.judul)}</b> untuk ditinjau. Mohon tanggapan paling lambat <b>${fmtTgl(tenggat)}</b>.</p>
-<p>Tanggapan dapat disampaikan dengan membalas email ini atau melalui tautan di bawah. Bila tidak ada catatan, pilih "Setuju tanpa catatan".</p>`, { url, label: 'Tinjau dokumen' }),
+<p>Dokumen terlampir untuk Anda baca. Pada dokumen, hanya bagian berwarna kuning yang dapat diisi atau diubah, dan itu dilakukan melalui aplikasi dengan tautan di bawah, bukan dengan mengubah berkas. Tanggapan dan persetujuan juga disampaikan melalui tautan yang sama. Bila tidak ada catatan, pilih "Setuju tanpa catatan".</p>`, { url, label: 'Tinjau dokumen' }),
   }),
   legal: ({ p, m, tenggat, appUrl }) => ({
     subject: `[Starlite] Mohon nomor surat — ${p.kode} ${m.nama}`,

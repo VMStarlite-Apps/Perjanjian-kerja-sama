@@ -85,6 +85,16 @@ const tFeedback = tokenOf(k1.portal);
 det = await api(`/api/perjanjian/${id}`);
 ok(det.tahap === 1 && det.tenggat && det.email[0].penerima.includes('desnarum'), 'tahap 1, tenggat SLA terisi, penerima benar');
 
+console.log('\nIsian kuning lewat aplikasi (VM dan mitra)');
+const ik = await api(`/api/perjanjian/${id}/isian`);
+ok(ik.status === 200 && ik.nama === 'PT DESNARUM UJI' && ik.tanggal === '2026-11-18' && ik.hari === 'Rabu', 'isian terkini terbaca (tanggal dan hari turunan)');
+ok((await api(`/api/perjanjian/${id}/isian`, { method: 'POST', body: { isi: ISI } })).status === 400, 'simpan tanpa perubahan ditolak');
+ok((await api(`/api/perjanjian/${id}/isian`, { method: 'POST', user: LEGAL, body: { isi: { ...ISI, jabatan: 'Komisaris' } } })).status === 403, 'hanya VM yang dapat mengubah isian');
+const ub = await api(`/api/perjanjian/${id}/isian`, { method: 'POST', body: { isi: { ...ISI, jabatan: 'Direktur Utama' } } });
+det = await api(`/api/perjanjian/${id}`);
+ok(ub.ok && ub.berubah.join() === 'jabatan' && det.dokumen.filter((d) => d.jenis === 'master').length === 2, 'VM mengubah isian: master versi 2 dibuat, hanya "jabatan" berubah', JSON.stringify(ub));
+ok((await api(`/api/perjanjian/${id}/isian`)).jabatan === 'Direktur Utama', 'isian terkini mengikuti versi terbaru');
+
 console.log('\nTahap 2 — feedback mitra (portal)');
 ok((await api('/api/portal', { token: 'salah-token-xxxxxxxxxxxxxxx' })).status === 401, 'token palsu ditolak');
 const pv = await api('/api/portal', { token: tFeedback });
@@ -92,6 +102,11 @@ ok(pv.status === 200 && pv.bisa_feedback && !pv.bisa_ttd, 'portal mitra terbuka 
 const dl = await api('/api/portal/dokumen', { token: tFeedback, raw: true });
 ok(dl.status === 200 && (await dl.arrayBuffer()).byteLength > 500, 'mitra dapat mengunduh dokumen');
 ok((await api('/api/portal/ttd', { method: 'POST', token: tFeedback, form: { opsi: '2', berkas: await pdf(29, 'scan') } })).status === 403, 'token tanggapan tidak bisa dipakai untuk TTD');
+ok(pv.isian && pv.isian.fields.length === 9 && pv.isian.nilai.jabatan === 'Direktur Utama', 'portal memuat isian kuning untuk mitra');
+const mi = await api('/api/portal/isian', { method: 'POST', token: tFeedback, body: { isi: { ...pv.isian.nilai, wakil: 'Budi Santoso, S.H.', alamat: 'Jl. Baru No. 9, Bandung' } } });
+ok(mi.ok && mi.berubah.sort().join() === 'alamat,wakil', 'mitra memperbarui isian lewat portal', JSON.stringify(mi));
+ok((await api('/api/portal/isian', { method: 'POST', token: tFeedback, body: { isi: { ...pv.isian.nilai, wakil: '' } } })).status === 400, 'isian kosong dari mitra ditolak');
+ok(det && (await api(`/api/perjanjian/${id}`)).email.some((e) => e.tipe === 'isian'), 'PIC VM diberi tahu bahwa mitra memperbarui isian');
 await api('/api/portal/feedback', { method: 'POST', token: tFeedback, body: { nama: 'Budi (Direktur)', isi: 'Mohon pasal 5 tentang termin pembayaran dijelaskan.' } });
 await api('/api/portal/feedback', { method: 'POST', token: tFeedback, body: { setuju: true } });
 det = await api(`/api/perjanjian/${id}`);
@@ -102,6 +117,7 @@ ok((await api(`/api/perjanjian/${id}/legal`, { method: 'POST', user: LEGAL })).s
 ok((await api(`/api/perjanjian/${id}/legal`, { method: 'POST' })).ok, 'diserahkan ke Legal');
 ok((await api(`/api/perjanjian/${id}/nomor`, { method: 'POST', user: LEGAL, form: { nomor_surat: 'x' } })).status === 400, 'format nomor tidak valid ditolak');
 ok((await api(`/api/perjanjian/${id}/nomor`, { method: 'POST', user: LEGAL, form: { nomor_surat: 'N'.repeat(70) } })).status === 400, 'nomor terlalu panjang untuk kolom template ditolak');
+ok((await api(`/api/perjanjian/${id}/isian`, { method: 'POST', body: { isi: { ...ISI, jabatan: 'Direktur' } } })).status === 409, 'isian terkunci setelah diserahkan ke Legal');
 const n1 = await api(`/api/perjanjian/${id}/nomor`, { method: 'POST', user: LEGAL, form: { nomor_surat: '001/PKS/IJE/XI/2026' } });
 ok(n1.ok, 'Legal menerbitkan nomor', JSON.stringify(n1));
 
