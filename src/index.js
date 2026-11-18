@@ -53,8 +53,8 @@ const json = async (c) => { try { return await c.req.json(); } catch { return {}
 
 // ---------- Sesi & konfigurasi ----------
 app.get('/api/me', async (c) => {
-  const u = await requireUser(c, { skipGanti: true });
-  return c.json({ ...u, mode: { google: googleEnabled(c.env), env: c.env.APP_ENV } });
+  const u = await requireUser(c, { skipGanti: true, bolehNonAdmin: true });
+  return c.json({ ...u, terkunci: u.peran !== 'admin', mode: { google: googleEnabled(c.env), env: c.env.APP_ENV } });
 });
 
 app.post('/api/login', async (c) => {
@@ -69,7 +69,7 @@ app.post('/api/login', async (c) => {
 
 app.post('/api/logout', async (c) => {
   let email = null;
-  try { email = (await requireUser(c, { skipGanti: true })).email; } catch {}
+  try { email = (await requireUser(c, { skipGanti: true, bolehNonAdmin: true })).email; } catch {}
   await akhiriSesi(c);
   if (email) await F.audit(c.env, email, null, 'logout');
   return c.json({ ok: true });

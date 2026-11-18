@@ -702,6 +702,11 @@ async function mulai() {
     app.innerHTML = `<div class="card" style="max-width:520px;margin:10vh auto"><div class="empty"><b>Tidak dapat memuat Starlite</b>${esc(e.message)}</div></div>`;
     return;
   }
+  if (S.me.terkunci) {
+    app.innerHTML = `<div class="card" style="max-width:520px;margin:10vh auto"><div class="empty"><b>Aplikasi PKS sedang dikunci</b>Saat ini hanya akun utama (Admin) yang dapat membuka aplikasi ini.<div style="margin-top:14px"><button class="btn" id="keluarKunci">Keluar</button></div></div></div>`;
+    document.getElementById('keluarKunci').addEventListener('click', async () => { try { await post('/api/logout', {}); } catch {} location.reload(); });
+    return;
+  }
   if (S.me.wajib_ganti) { layarGanti(); return; }
   S.meta = await api('/api/meta');
   shell(true);

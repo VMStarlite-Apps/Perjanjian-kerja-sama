@@ -50,10 +50,14 @@ async function resolveEmail(c) {
 }
 
 /** Pengguna aktif dari sesi. Akun dengan password sementara hanya boleh ganti password (skipGanti = true untuk endpoint itu). */
-export async function requireUser(c, { skipGanti = false } = {}) {
+export async function requireUser(c, { skipGanti = false, bolehNonAdmin = false } = {}) {
   const email = await resolveEmail(c);
   const u = await c.env.DB.prepare('SELECT email, nama, peran, penandatangan, wajib_ganti FROM pks_pengguna WHERE email = ? AND aktif = 1').bind(email).first();
   if (!u) fail(c.env.APP_ENV === 'dev' && c.req.header('x-dev-user') ? 403 : 401, `Akun ${email} belum terdaftar di Starlite atau dinonaktifkan. Hubungi Admin.`);
+  // Kunci: aplikasi PKS hanya untuk akun utama (Admin). Pengecualian hanya untuk /api/me & logout (agar layar terkunci bisa tampil).
+  // Hanya di mode dev, PKS_TERBUKA=1 membuka kunci agar uji peran tetap bisa jalan; di produksi tidak berlaku.
+  const terbuka = c.env.APP_ENV === 'dev' && c.env.PKS_TERBUKA === '1';
+  if (u.peran !== 'admin' && !bolehNonAdmin && !terbuka) fail(403, 'Aplikasi PKS saat ini hanya dapat diakses oleh akun utama (Admin).');
   if (u.wajib_ganti && !skipGanti) fail(403, 'Ganti password sementara Anda terlebih dahulu');
   return u;
 }

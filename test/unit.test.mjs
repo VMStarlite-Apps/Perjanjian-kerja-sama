@@ -102,3 +102,18 @@ test('format email: placeholder nama mitra, tautan, dan aman dari HTML', () => {
   assert.equal(k.subject, 'Halo PT A & B X');
   assert.ok(k.html.includes('Yth PT A &amp; B') && k.html.includes('<a href="https://x.test/p#t=abc">'));
 });
+
+import { requireUser } from '../src/lib/auth.js';
+const ctxUji = (peran, env = {}) => ({
+  req: { header: (k) => (k === 'x-dev-user' ? 'u@x.id' : undefined) },
+  env: { APP_ENV: 'dev', ...env, DB: { prepare: () => ({ bind: () => ({ first: async () => ({ email: 'u@x.id', nama: 'U', peran, penandatangan: 0, wajib_ganti: 0 }) }) }) } },
+});
+test('kunci aplikasi: hanya admin; /api/me tetap boleh; produksi tidak bisa dibuka', async () => {
+  await assert.rejects(() => requireUser(ctxUji('vm')), (e) => e.status === 403);
+  await assert.rejects(() => requireUser(ctxUji('legal')), (e) => e.status === 403);
+  assert.equal((await requireUser(ctxUji('admin'))).peran, 'admin');
+  assert.equal((await requireUser(ctxUji('vm'), { bolehNonAdmin: true })).peran, 'vm');
+  assert.equal((await requireUser(ctxUji('vm', { PKS_TERBUKA: '1' }))).peran, 'vm');
+  const prod = ctxUji('vm', { PKS_TERBUKA: '1' }); prod.env.APP_ENV = 'production'; prod.req.header = () => 'Bearer x';
+  await assert.rejects(() => requireUser(prod), () => true); // produksi: bendera dev diabaikan (tanpa sesi valid tetap ditolak)
+});
