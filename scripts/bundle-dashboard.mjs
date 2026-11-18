@@ -64,6 +64,12 @@ app = ganti(app, "const tokenGet = () => { try { return sessionStorage.getItem(T
 app = ganti(app, "const tokenSet = (t) => { try { t ? sessionStorage.setItem(TKEY, t) : sessionStorage.removeItem(TKEY); } catch {} };",
   "const tokenSet = (t, ingat) => { try { sessionStorage.removeItem(TKEY); localStorage.removeItem(TKEY); if (t) (ingat ? localStorage : sessionStorage).setItem(TKEY, t); } catch {} };");
 app = ganti(app, "const r = await fetch(BASE + path,", 'const r = await pfetch(BASE + path,');
+// tanpa login kedua: sesi dashboard (token Akun Utama) dikirim ke backend PKS untuk diverifikasi
+app = ganti(app, "const t = tokenGet();\n  const headers = { ...(opts.headers || {}), ...(t ? { authorization: `Bearer ${t}` } : {}) };",
+  "let vm = ''; try { vm = (typeof currentUser !== 'undefined' && currentUser && currentUser.token) || ''; } catch {}\n  const headers = { ...(opts.headers || {}), ...(vm ? { 'x-vm-token': vm } : {}) };");
+app = ganti(app, "S.me) { S.me = null; showLogin('Sesi berakhir, silakan masuk lagi.'); }", "S.me) { S.me = null; sesiHabis(); }");
+app = ganti(app, "if (e.status === 401) { showLogin(); return; }", "if (e.status === 401 || e.status === 403) { sesiHabis(e.message); return; }");
+app = ganti(app, 'function showLogin(pesan = \'\') {', "function sesiHabis(m) { app.innerHTML = `<div class=\"card\" style=\"max-width:520px;margin:10vh auto\"><div class=\"empty\"><b>Sesi dashboard berakhir</b>${esc(m || 'Masuk ulang ke dashboard dengan Akun Utama.')}</div></div>`; }\nfunction showLogin(pesan = '') {");
 app = ganti(app, 'document.body.append(dlg)', 'ROOT.append(dlg)', true);
 app = ganti(app, '  document.body.append(t);', '  if (typeof window.showToast === \'function\') { t.remove(); window.showToast(msg, err ? \'error\' : \'success\'); return; }\n  ROOT.append(t);');
 // rute di dalam dashboard memakai awalan #/pks
@@ -81,7 +87,7 @@ app = ganti(app, 'tokenSet(r.token); }', 'tokenSet(r.token, f.ingat?.checked); }
 app = ganti(app, '<h1>Masuk ke Starlite</h1><p class="muted">Pemantauan perjanjian kerja sama mitra</p>', '<h1>Masuk ke Perjanjian</h1><p class="muted">Gunakan akun Admin aplikasi Perjanjian.</p>');
 // akun (ganti password/keluar) pindah ke bilah atas
 app = ganti(app, `<div class="who"><div class="avatar">\${esc(ini)}</div><div><b>\${esc(S.me.nama)}</b><span>\${esc(S.me.peran === 'vm' ? 'Vendor Management' : S.me.peran)}</span></div></div>`,
-  `<div class="who"><div class="avatar">\${esc(ini)}</div><div><b>\${esc(S.me.nama)}</b><span>\${esc(S.me.peran === 'vm' ? 'Vendor Management' : S.me.peran)}</span></div></div><div class="pks-akun"><button class="btn ghost sm" data-ganti type="button">Ganti password</button><button class="btn ghost sm" data-keluar type="button">Keluar</button></div>`);
+  `<div class="who"><div class="avatar">\${esc(ini)}</div><div><b>\${esc(S.me.nama)}</b><span>\${esc(S.me.peran === 'vm' ? 'Vendor Management' : S.me.peran)}</span></div></div><a class="icon-btn" href="#/pks/pengaturan" aria-label="Pengaturan" title="Pengaturan">\${ic('gear')}</a>`);
 app = ganti(app, "function bindSearch() {", "function bindSearch() {\n  $('[data-keluar]')?.addEventListener('click', keluar);\n  $('[data-ganti]')?.addEventListener('click', () => bukaGanti(false));");
 app = ganti(app, "if (!mulai.terikat) { window.addEventListener('hashchange', () => S.me && route()); mulai.terikat = true; }",
   "if (!mulai.terikat) { window.addEventListener('hashchange', () => { if (S.me && /^#\\/pks/.test(location.hash) && ROOT && ROOT.isConnected) route(); }); mulai.terikat = true; }");

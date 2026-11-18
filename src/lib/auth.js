@@ -40,8 +40,37 @@ export async function sesiSaatIni(c) {
   return token ? sha256Hex(token) : null;
 }
 
+// Sesi dashboard VM: token dashboard diverifikasi ke backend dashboard (aksi "me"). Hanya Akun Utama (owner + mainOwner) yang lolos.
+// Hasil verifikasi disimpan singkat di memori agar tidak memanggil Apps Script di setiap permintaan.
+const VM_BACKEND = 'https://script.google.com/macros/s/AKfycby9hJGo8rN0atk6OguUTA4v4Eq2skh1j3ic-jm1U6Rf-AE_JlHgW9MzPZCrlXHSpW-Y/exec';
+const cacheVm = new Map();
+const CACHE_VM_MS = 120_000;
+async function verifikasiDashboard(c, token) {
+  const kunci = await sha256Hex(token);
+  const t = Date.now();
+  const hit = cacheVm.get(kunci);
+  if (hit && hit.sampai > t) return hit.ok;
+  let ok = false;
+  try {
+    const r = await fetch(c.env.VM_BACKEND_URL || VM_BACKEND, { method: 'POST', redirect: 'follow', headers: { 'content-type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ action: 'me', token }) });
+    const j = await r.json();
+    ok = !!(j && j.ok && j.role === 'owner' && j.perms && j.perms.mainOwner);
+  } catch { fail(503, 'Tidak dapat memeriksa sesi dashboard. Coba lagi sebentar.'); }
+  if (cacheVm.size > 200) cacheVm.clear();
+  cacheVm.set(kunci, { ok, sampai: t + CACHE_VM_MS });
+  return ok;
+}
+
 async function resolveEmail(c) {
   if (c.env.APP_ENV === 'dev' && c.req.header('x-dev-user')) return c.req.header('x-dev-user').toLowerCase();
+  const vm = c.req.header('x-vm-token');
+  if (vm) {
+    if (!(await verifikasiDashboard(c, vm))) fail(401, 'Sesi dashboard berakhir atau bukan Akun Utama. Masuk ulang ke dashboard.');
+    const a = await c.env.DB.prepare("SELECT email FROM pks_pengguna WHERE peran = 'admin' AND aktif = 1 ORDER BY email LIMIT 1").first();
+    if (!a) fail(403, 'Belum ada pengguna Admin aktif di aplikasi Perjanjian.');
+    c.set('viaDashboard', true);
+    return a.email;
+  }
   const id = await sesiSaatIni(c);
   if (!id) fail(401, 'Silakan masuk');
   const s = await c.env.DB.prepare('SELECT email FROM pks_sesi WHERE id = ? AND kedaluwarsa > ?').bind(id, now()).first();
@@ -58,7 +87,7 @@ export async function requireUser(c, { skipGanti = false, bolehNonAdmin = false 
   // Hanya di mode dev, PKS_TERBUKA=1 membuka kunci agar uji peran tetap bisa jalan; di produksi tidak berlaku.
   const terbuka = c.env.APP_ENV === 'dev' && c.env.PKS_TERBUKA === '1';
   if (u.peran !== 'admin' && !bolehNonAdmin && !terbuka) fail(403, 'Aplikasi PKS saat ini hanya dapat diakses oleh akun utama (Admin).');
-  if (u.wajib_ganti && !skipGanti) fail(403, 'Ganti password sementara Anda terlebih dahulu');
+  if (u.wajib_ganti && !skipGanti && !c.get('viaDashboard')) fail(403, 'Ganti password sementara Anda terlebih dahulu');
   return u;
 }
 

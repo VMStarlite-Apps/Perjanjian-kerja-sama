@@ -38,7 +38,7 @@ app.use('/api/*', async (c, next) => {
   if (c.req.method === 'OPTIONS') {
     if (!boleh) return c.body(null, 403);
     c.header('access-control-allow-methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    c.header('access-control-allow-headers', 'authorization,content-type,x-portal-token,x-legal-sesi');
+    c.header('access-control-allow-headers', 'authorization,content-type,x-portal-token,x-legal-sesi,x-vm-token');
     c.header('access-control-max-age', '600');
     return c.body(null, 204);
   }
@@ -54,7 +54,7 @@ const json = async (c) => { try { return await c.req.json(); } catch { return {}
 // ---------- Sesi & konfigurasi ----------
 app.get('/api/me', async (c) => {
   const u = await requireUser(c, { skipGanti: true, bolehNonAdmin: true });
-  return c.json({ ...u, terkunci: u.peran !== 'admin', mode: { google: googleEnabled(c.env), env: c.env.APP_ENV } });
+  return c.json({ ...u, wajib_ganti: c.get('viaDashboard') ? 0 : u.wajib_ganti, terkunci: u.peran !== 'admin', mode: { google: googleEnabled(c.env), env: c.env.APP_ENV } });
 });
 
 app.post('/api/login', async (c) => {

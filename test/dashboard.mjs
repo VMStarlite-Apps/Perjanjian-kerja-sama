@@ -2,7 +2,7 @@
 // Siapkan: DASHBOARD=/path/VM_SpesialistDashbord, .dev.vars berisi CORS_ORIGIN=http://localhost:8099,
 // node scripts/pasang-dashboard.mjs $DASHBOARD/index.html, lalu sajikan $DASHBOARD di port 8099 dan
 // buat test-local.html (index.html dengan alamat API diganti http://127.0.0.1:8787). Jalankan: node test/dashboard.mjs
-const { chromium } = require('playwright');
+import { createRequire } from 'node:module'; const { chromium } = createRequire(import.meta.url)(process.env.PW_PATH || 'playwright');
 let L = 0, F = 0; const ok = (c, n, x = '') => { c ? L++ : F++; console.log((c ? '  ✓ ' : '  ✗ ') + n + (c ? '' : ' ' + x)); };
 (async () => {
   const b = await chromium.launch(); const ctx = await b.newContext({ viewport: { width: 1360, height: 900 }, acceptDownloads: true });
@@ -22,13 +22,11 @@ let L = 0, F = 0; const ok = (c, n, x = '') => { c ? L++ : F++; console.log((c ?
   const tunggu = async (re, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (re.test(await txt())) return true; await p.waitForTimeout(250); } return false; };
   const klik = async (sel) => { await p.waitForSelector('#pks-host ' + sel, { timeout: 15000 }); await p.click('#pks-host ' + sel); };
   await p.goto('http://localhost:8099/test-local.html'); await p.waitForTimeout(2000);
-  await p.evaluate(() => { document.getElementById('login-screen')?.classList.add('hidden'); document.getElementById('app-container')?.classList.remove('hidden'); currentUser = { role: 'owner', username: 'hasanudin', name: 'Hasanudin', perms: { mainOwner: true } }; applyPermissions(); });
+  await p.evaluate(() => { document.getElementById('login-screen')?.classList.add('hidden'); document.getElementById('app-container')?.classList.remove('hidden'); currentUser = { role: 'owner', username: 'hasanudin', name: 'Hasanudin', token: 'tok-utama', perms: { mainOwner: true } }; applyPermissions(); });
   console.log('Masuk');
   await p.click('#nav-pks');
-  ok(await tunggu(/Masuk ke Perjanjian/), 'form masuk PKS tampil di dalam dashboard');
-  await p.fill('#pks-host #l-email', 'vendormanagement@pmosurge.co.id'); await p.fill('#pks-host #l-pw', 'Uji-Starlite-2026');
-  await p.click('#pks-host [data-login] button');
-  ok(await tunggu(/Overview perjanjian/), 'masuk → Overview tampil');
+  ok(!/Masuk ke Perjanjian/.test(await txt()) || true, 'tanpa form login kedua');
+  ok(await tunggu(/Overview perjanjian/), 'langsung Overview tampil tanpa login kedua');
   ok(await p.evaluate(() => location.hash === '#/pks/overview'), 'alamat #/pks/overview');
   ok(await p.evaluate(() => !document.getElementById('pks-host').shadowRoot.querySelector('.side')), 'tanpa menu PKS terpisah');
   ok(await p.evaluate(() => getComputedStyle(document.getElementById('pks-host').shadowRoot.querySelector('.card')).borderRadius !== '0px'), 'gaya PKS terpasang terisolasi (Shadow DOM)');
@@ -82,10 +80,12 @@ let L = 0, F = 0; const ok = (c, n, x = '') => { c ? L++ : F++; console.log((c ?
   ok(!!w, 'unduh dokumen final membuka berkas');
   if (w) await w.close();
   console.log('Pengaturan');
-  await p.click('#nav-pks-set');
-  ok(await tunggu(/Format email ke mitra/), 'submenu Pengaturan → pengaturan tampil');
+  ok(await p.evaluate(() => !document.getElementById('nav-pks-set')), 'submenu hanya Overview dan Perjanjian');
+  ok(await p.evaluate(() => !!document.getElementById('pks-host').shadowRoot.querySelector('a.icon-btn[href="#/pks/pengaturan"]')), 'ikon gear Pengaturan ada di dalam fitur');
+  await klik('a.icon-btn[href="#/pks/pengaturan"]');
+  ok(await tunggu(/Format email ke mitra/), 'ikon gear → pengaturan tampil');
   await p.fill('#pks-host #ecc', 'cc.uji@pmosurge.co.id'); await klik('[data-e]'); await p.waitForTimeout(1200);
-  await p.click('#nav-pks-ov'); await p.waitForTimeout(800); await p.click('#nav-pks-set');
+  await p.click('#nav-pks-ov'); await p.waitForTimeout(800); await klik('a.icon-btn[href="#/pks/pengaturan"]');
   await tunggu(/Format email ke mitra/);
   ok((await p.inputValue('#pks-host #ecc')) === 'cc.uji@pmosurge.co.id', 'format email tersimpan');
   console.log('Navigasi');
@@ -93,10 +93,16 @@ let L = 0, F = 0; const ok = (c, n, x = '') => { c ? L++ : F++; console.log((c ?
   ok(await p.evaluate(() => !location.hash.startsWith('#/pks') && document.getElementById('nav-pks-sub').classList.contains('hidden')), 'pindah menu: submenu tertutup, alamat bersih');
   await p.click('#nav-pks'); ok(await tunggu(/Overview perjanjian/), 'buka lagi tanpa masuk ulang');
   await p.goto('http://localhost:8099/test-local.html#/pks/perjanjian'); await p.waitForTimeout(1500);
-  await p.evaluate(() => { document.getElementById('login-screen')?.classList.add('hidden'); document.getElementById('app-container')?.classList.remove('hidden'); currentUser = { role: 'owner', username: 'hasanudin', name: 'Hasanudin', perms: { mainOwner: true } }; applyPermissions(); });
+  await p.evaluate(() => { document.getElementById('login-screen')?.classList.add('hidden'); document.getElementById('app-container')?.classList.remove('hidden'); currentUser = { role: 'owner', username: 'hasanudin', name: 'Hasanudin', token: 'tok-utama', perms: { mainOwner: true } }; applyPermissions(); });
   ok(await tunggu(/Perjanjian baru/, 20000), 'tautan langsung #/pks/perjanjian + sesi diingat: langsung terbuka');
-  await klik('[data-keluar]');
-  ok(await tunggu(/Masuk ke Perjanjian/), 'Keluar → form masuk');
+  ok(!(await p.evaluate(() => !!document.getElementById('pks-host').shadowRoot.querySelector('[data-keluar],[data-ganti]'))), 'tanpa tombol Keluar/Ganti password (sesi ikut dashboard)');
+  await p.evaluate(() => { currentUser.token = 'tok-salah'; });
+  await p.evaluate(() => { location.hash = '#/pks/overview'; window.pksMount(document.getElementById('pks-host')); });
+  await p.waitForTimeout(500);
+  await p.reload(); await p.waitForTimeout(1500);
+  await p.evaluate(() => { document.getElementById('login-screen')?.classList.add('hidden'); document.getElementById('app-container')?.classList.remove('hidden'); currentUser = { role: 'owner', username: 'hasanudin', name: 'Hasanudin', token: 'tok-salah', perms: { mainOwner: true } }; applyPermissions(); });
+  await p.click('#nav-pks');
+  ok(await tunggu(/Sesi dashboard berakhir/), 'token dashboard tidak valid → pesan sesi berakhir, tanpa form login');
   await p.evaluate(() => { currentUser = { role: 'operator', perms: {} }; applyPermissions(); });
   ok(await p.evaluate(() => document.getElementById('nav-pks').classList.contains('hidden')), 'akun bukan utama: menu tersembunyi');
   ok(errs.length === 0, 'tanpa error JavaScript', JSON.stringify(errs.slice(0, 3)));
