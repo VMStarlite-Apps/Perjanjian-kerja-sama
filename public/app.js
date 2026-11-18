@@ -215,7 +215,7 @@ async function pageDashboard() {
         <a href="#/perjanjian/${t.id}" style="min-width:0;color:inherit;text-decoration:none"><div class="t">${esc(t.mitra)}</div><div class="s">${esc(tahapNama(t.tahap))}, ${esc(t.nomor_surat || t.kode)}</div></a>
         <span class="time">${t.tenggat ? tgl(t.tenggat) : ''}</span>${chipSisa(t.tenggat) || '<span class="chip c-idle">Draf</span>'}</li>`).join('')}</ul>`
     : `<div class="empty"><b>Tidak ada tindakan tertunda</b>${can('vm') ? 'Mulai dengan membuat perjanjian baru.' : 'Antrean Anda kosong.'}</div>`;
-  const durOf = (n) => d.durasi.find((x) => x.tahap === n)?.hari;
+  const durOf = (n) => { const l = d.pipeline.find((x) => x.n === n); const v = d.durasi.filter((x) => l?.tahap.includes(x.tahap)); return v.length ? Math.round(v.reduce((a, x) => a + x.hari, 0) * 10) / 10 : null; };
   const trenMax = Math.max(1, ...d.tren.map((t) => Math.max(t.masuk, t.selesai)));
   const bln = (m) => BULAN[Number(m.slice(5, 7)) - 1];
   const sub = d.tindakan.length ? `${d.tindakan.length} perjanjian menunggu tindakan${k.telat ? `, ${k.telat} lewat tenggat` : ''}.` : 'Semua perjanjian berjalan sesuai jadwal.';
@@ -253,25 +253,23 @@ async function pageDashboard() {
 // ---------- Daftar perjanjian ----------
 async function pagePerjanjian(params) {
   const q = params.get('q') || '', tahap = params.get('tahap') ?? '', status = params.get('status') || '';
-  const view = ls.get('starlite.view', 'tabel');
   const qs = new URLSearchParams(); if (q) qs.set('q', q); if (tahap !== '') qs.set('tahap', tahap); if (status) qs.set('status', status);
   const rows = await api('/api/perjanjian?' + qs);
-  const filters = [['', '', 'Semua'], ...S.meta.tahap.map((t) => [String(t.n), '', t.nama]), ['', 'terlambat', 'Terlambat'], ['', 'batal', 'Dibatalkan']];
-  const isOn = (t, s) => (t === tahap && s === status) || (!t && !s && tahap === '' && !status);
+  const filters = [['', '', 'Semua'], ...S.meta.langkah.map((l) => [String(l.tahap[0]), '', l.nama]), ['7', '', 'Selesai'], ['', 'terlambat', 'Terlambat'], ['', 'batal', 'Dibatalkan']];
+  const lk = (t) => S.meta.tahap[Number(t)]?.langkah;
+  const isOn = (t, s) => (s ? s === status && tahap === '' : t !== '' ? tahap !== '' && !status && lk(t) === lk(tahap) : tahap === '' && !status);
   const table = rows.length ? `<div class="table-wrap"><table class="t"><thead><tr><th>Mitra</th><th>Perjanjian</th><th>Tahap</th><th>Nomor surat</th><th>Tenggat</th><th>Status</th></tr></thead><tbody>
     ${rows.map((p) => `<tr data-href="#/perjanjian/${p.id}" tabindex="0"><td><div class="cell-main">${esc(p.mitra_nama)}</div><div class="cell-sub">${esc(p.kode)}</div></td><td>${esc(p.judul)}</td><td>${esc(tahapNama(p.tahap))}</td><td>${esc(p.nomor_surat || '–')}</td><td class="nw">${p.tahap < 7 && p.status !== 'batal' ? (p.tenggat ? `${tgl(p.tenggat)}<div class="cell-sub">${sisa(p.tenggat)?.label}</div>` : '–') : '–'}</td><td>${chipTampil(p.tampil)}</td></tr>`).join('')}
     </tbody></table></div>` : `<div class="empty"><b>${q || tahap !== '' || status ? 'Tidak ada perjanjian yang cocok' : 'Belum ada perjanjian'}</b>${can('vm') ? 'Buat perjanjian baru dari data info perseroan.' : ''}</div>`;
-  const kanban = `<div class="kanban" style="grid-template-columns:repeat(8,minmax(210px,1fr))">${S.meta.tahap.map((t) => { const items = rows.filter((p) => p.tahap === t.n && p.status !== 'batal'); return `<div class="lane"><h3><span>${esc(t.nama)}</span><span class="muted num">${items.length}</span></h3>${items.map((p) => `<a class="kcard" href="#/perjanjian/${p.id}"><b>${esc(p.mitra_nama)}</b><span>${esc(p.nomor_surat || p.kode)}</span><div style="margin-top:8px">${t.n < 7 ? chipSisa(p.tenggat) : chipTampil(p.tampil)}</div></a>`).join('')}</div>`; }).join('')}</div>`;
   app.innerHTML = `${topbar('Perjanjian', `${rows.length} perjanjian${q ? ` untuk "${esc(q)}"` : ''}`)}
     <div class="card">
       <div class="card-head" style="flex-wrap:wrap"><div class="tabs" role="group" aria-label="Saring tahap">${filters.map(([t, s, l]) => `<button aria-pressed="${isOn(t, s)}" data-t="${t}" data-s="${s}">${esc(l)}</button>`).join('')}</div>
-        <div class="row"><div class="seg-toggle" role="group" aria-label="Tampilan"><button aria-pressed="${view === 'tabel'}" data-view="tabel">Tabel</button><button aria-pressed="${view === 'kanban'}" data-view="kanban">Kanban</button></div>${can('vm') ? `<button class="btn" data-new>${ic('plus')}Perjanjian baru</button>` : ''}</div></div>
-      ${view === 'kanban' ? kanban : table}
+        <div class="row">${can('vm') ? `<button class="btn" data-new>${ic('plus')}Perjanjian baru</button>` : ''}</div></div>
+      ${table}
     </div>`;
   bindSearch();
   if (q) $('#q').value = q;
   $$('.tabs button').forEach((b) => b.addEventListener('click', () => { const n = new URLSearchParams(); if (q) n.set('q', q); if (b.dataset.t) n.set('tahap', b.dataset.t); if (b.dataset.s) n.set('status', b.dataset.s); location.hash = '#/perjanjian' + (n.toString() ? '?' + n : ''); }));
-  $$('[data-view]').forEach((b) => b.addEventListener('click', () => { ls.set('starlite.view', b.dataset.view); route(); }));
   $$('tr[data-href]').forEach((tr) => {
     tr.addEventListener('click', () => { location.hash = tr.dataset.href; });
     tr.addEventListener('keydown', (e) => { if (e.key === 'Enter') location.hash = tr.dataset.href; });
@@ -350,12 +348,13 @@ async function pageDetail(id) {
   const p = await api(`/api/perjanjian/${id}`);
   const m = p.mitra;
   const cur = p.status === 'batal' ? -1 : p.tahap;
-  const riwayatOf = (n) => p.riwayat.filter((r) => r.tahap === n).at(-1);
-  const timeline = S.meta.tahap.map((t) => {
-    const r = riwayatOf(t.n);
-    const cls = t.n < cur || (t.n === 7 && cur === 7) ? 'done' : t.n === cur ? 'now' : '';
-    const info = t.n === cur && t.n < 7 && p.tenggat ? `Tenggat ${tgl(p.tenggat)}` : r ? (r.selesai ? `Selesai ${tgl(r.selesai)}` : `Mulai ${tgl(r.mulai)}`) : '';
-    return `<li class="${cls}"><span class="node">${cls === 'done' ? '✓' : t.n}</span><b>${esc(t.nama)}</b><span>${info}</span></li>`;
+  const curL = cur < 0 ? -1 : S.meta.tahap[cur].langkah;
+  const timeline = S.meta.langkah.map((l) => {
+    const rs = p.riwayat.filter((r) => l.tahap.includes(r.tahap));
+    const awal = rs[0], akhir = rs.at(-1);
+    const cls = l.n < curL ? 'done' : l.n === curL ? 'now' : '';
+    const info = cls === 'now' && p.tenggat ? `Tenggat ${tgl(p.tenggat)}` : cls === 'done' && akhir?.selesai ? `Selesai ${tgl(akhir.selesai)}` : awal ? `Mulai ${tgl(awal.mulai)}` : '';
+    return `<li class="${cls}"><span class="node">${cls === 'done' ? '✓' : l.n + 1}</span><b>${esc(l.nama)}</b><span>${info}</span></li>`;
   }).join('');
   const docs = p.dokumen.length ? `<ul class="list docs">${p.dokumen.map((d) => `<li><span class="fi">${ic('file')}</span><div style="min-width:0"><div class="t">${esc(JENIS_DOK[d.jenis])}, versi ${d.versi}</div><div class="s">${tgl(d.dibuat_pada)} oleh ${esc(aktor(d.pengunggah, d.pengunggah_nama))}${d.halaman ? `, ${d.halaman} halaman` : ''} <span class="hash" title="SHA-256 ${esc(d.sha256)}">#${esc(d.sha256.slice(0, 10))}</span></div></div>
     <span>${d.penanda ? `<span class="chip ${d.penanda === 'scan_asli' ? 'c-ok' : 'c-info'}">${d.penanda === 'scan_asli' ? 'Scan asli' : 'Hasil tempel'}</span>` : ''} ${d.status !== 'aktif' ? `<span class="chip ${d.status === 'tidak_sesuai' ? 'c-late' : d.status === 'menunggu_review' ? 'c-warn' : 'c-idle'}">${{ tidak_sesuai: 'Tidak sesuai', menunggu_review: 'Menunggu review', ditolak: 'Ditolak' }[d.status]}</span>` : ''}</span>
@@ -400,18 +399,20 @@ function renderAction(p) {
     html = head('Langkah berikutnya', 'Kirim dokumen ke mitra', m.emails.length ? `Email beserta dokumen dan tautan tanggapan dikirim dari ${esc(S.me.mode.google ? 'akun Vendor Management' : 'mode simulasi')} ke ${m.emails.map(esc).join(', ')}.` : '')
       + (m.emails.length ? (can('vm') ? `<button class="btn" data-a="kirim">${ic('send')}Kirim ke mitra</button>` : '') : `<div class="notice">Email mitra kosong di info perseroan. Lengkapi kolom email pada tabel mitra di Cloudflare, lalu muat ulang halaman ini.</div>`);
   } else if (p.tahap === 1 || p.tahap === 2) {
-    html = head(p.tahap === 1 ? 'Menunggu mitra' : 'Tanggapan diterima', p.tahap === 1 ? 'Menunggu tanggapan mitra' : 'Tinjau tanggapan, lalu serahkan ke Legal', p.tahap === 1 ? `Batas tanggapan ${tgl(p.tenggat)}. Balasan email mitra tercatat otomatis.` : 'Feedback dicatat sebagai catatan; isi dokumen tidak berubah. Bila perlu revisi isi, Legal menerbitkan versi baru.')
-      + (can('vm') ? `<div class="row" style="margin-bottom:16px"><button class="btn" data-a="legal">${ic('stamp')}Serahkan ke Legal</button></div>
-      <details class="more"><summary>Catat tanggapan dari kanal lain</summary><div style="margin-top:12px"><div class="field"><label for="fb-isi">Isi tanggapan</label><textarea class="input" id="fb-isi" placeholder="Misal tanggapan lewat telepon atau WhatsApp"></textarea></div>
-      <label class="row small" style="margin-bottom:12px"><input type="checkbox" id="fb-setuju"> Mitra setuju tanpa catatan</label><button class="btn ghost" data-a="fb">Catat tanggapan</button></div></details>` : '');
+    html = (p.tahap === 1
+      ? head('Review mitra', 'Menunggu persetujuan mitra', `Batas ${tgl(p.tenggat)}. Mitra mengisi bagian kuning dan menyetujui lewat aplikasi. Begitu mitra setuju, dokumen otomatis diteruskan ke Legal.`)
+      : head('Review mitra', 'Mitra memberi catatan', 'Tindak lanjuti catatan (ubah isian bila perlu). Bila sudah beres, teruskan ke Legal atau tunggu mitra menekan Setuju.')
+        + (can('vm') ? `<div class="row" style="margin-bottom:16px"><button class="btn" data-a="legal">${ic('stamp')}Teruskan ke Legal</button></div>` : ''))
+      + (can('vm') ? `<details class="more"><summary>Catat tanggapan dari telepon/WhatsApp</summary><div style="margin-top:12px"><div class="field"><label for="fb-isi">Isi tanggapan</label><textarea class="input" id="fb-isi" placeholder="Misal: setuju lewat telepon"></textarea></div>
+      <label class="row small" style="margin-bottom:12px"><input type="checkbox" id="fb-setuju"> Mitra setuju (langsung ke Legal)</label><button class="btn ghost" data-a="fb">Catat tanggapan</button></div></details>` : '');
   } else if (p.tahap === 3) {
     html = can('legal')
-      ? head('Tugas Legal', 'Terbitkan nomor surat', `Nomor dicetak otomatis pada kolom No. di halaman pertama dokumen. Tenggat ${tgl(p.tenggat)}.`)
+      ? head('Tugas Legal', 'Terbitkan nomor surat', `Nomor dicetak otomatis di halaman pertama, lalu dokumen langsung dikirim ke mitra untuk TTD. Tenggat ${tgl(p.tenggat)}.`)
         + `<div class="field"><label for="no">Nomor surat</label><input class="input" id="no" placeholder="Contoh: 001/PKS/IJE/XI/2026"></div><button class="btn" data-a="nomor">Terbitkan nomor</button>`
       : head('Di Legal', 'Menunggu nomor surat dari Legal', `Tenggat ${tgl(p.tenggat)}.`);
   } else if (p.tahap === 4) {
-    html = head('Langkah berikutnya', 'Bagikan perjanjian bernomor ke mitra', `Mitra menerima PDF No. ${esc(p.nomor_surat)} dan tautan untuk mengunggah tanda tangan.`)
-      + (can('vm') ? `<button class="btn" data-a="bagikan">${ic('send')}Bagikan ke mitra</button>` : '');
+    html = head('Perlu tindakan', 'Dokumen bernomor belum terkirim ke mitra', `Pengiriman otomatis gagal (biasanya email mitra kosong). Lengkapi email mitra di info perseroan, lalu kirim ulang.`)
+      + (can('vm') ? `<button class="btn" data-a="bagikan">${ic('send')}Kirim ulang ke mitra</button>` : '');
   } else if (p.tahap === 5) {
     const rev = p.dokumen.find((d) => d.jenis === 'ttd_mitra' && d.status === 'menunggu_review');
     if (rev && can('vm')) {
@@ -436,7 +437,7 @@ function renderAction(p) {
   }
   if (can('vm') && p.status !== 'batal' && p.tahap < 7 && p.tahap > 0) {
     html += `<details class="more" style="margin-top:20px;padding-top:14px;border-top:1px solid var(--line)"><summary>Koreksi alur</summary><div style="margin-top:12px">
-      <div class="row"><div class="field" style="flex:1;margin:0"><label for="ke">Kembalikan ke tahap</label><select class="input" id="ke">${S.meta.tahap.filter((t) => t.n < p.tahap).map((t) => `<option value="${t.n}">${esc(t.nama)}</option>`).join('')}</select></div></div>
+      <div class="row"><div class="field" style="flex:1;margin:0"><label for="ke">Kembalikan ke langkah</label><select class="input" id="ke">${S.meta.langkah.filter((l) => l.tahap[0] < p.tahap && l.n < S.meta.tahap[p.tahap].langkah).map((l) => `<option value="${l.tahap[0]}">${esc(l.nama)}</option>`).join('')}</select></div></div>
       <div class="field" style="margin-top:10px"><label for="kor">Alasan</label><textarea class="input" id="kor" placeholder="Wajib diisi, tercatat di jejak audit"></textarea></div>
       <div class="row"><button class="btn ghost" data-a="mundur">Kembalikan tahap</button><button class="btn danger" data-a="batal">Batalkan perjanjian</button></div></div></details>`;
   }
@@ -444,9 +445,9 @@ function renderAction(p) {
   $$('iframe[data-pdf]', box).forEach(async (fr) => { try { const b = await api(`/api/dokumen/${fr.dataset.pdf}`); fr.src = URL.createObjectURL(b) + '#page=999&view=FitH'; } catch (e) { toast(e.message, true); } });
 
   doIt('[data-a="kirim"]', () => post(`/api/perjanjian/${p.id}/kirim`), 'Dokumen dikirim ke mitra');
-  doIt('[data-a="legal"]', () => post(`/api/perjanjian/${p.id}/legal`), 'Diserahkan ke Legal');
+  doIt('[data-a="legal"]', () => post(`/api/perjanjian/${p.id}/legal`), 'Diteruskan ke Legal');
   doIt('[data-a="fb"]', () => post(`/api/perjanjian/${p.id}/feedback`, { isi: $('#fb-isi').value, setuju: $('#fb-setuju').checked }), 'Tanggapan dicatat');
-  doIt('[data-a="nomor"]', () => { const fd = new FormData(); fd.set('nomor_surat', $('#no').value); return postForm(`/api/perjanjian/${p.id}/nomor`, fd); }, 'Nomor surat terbit');
+  doIt('[data-a="nomor"]', () => { const fd = new FormData(); fd.set('nomor_surat', $('#no').value); return postForm(`/api/perjanjian/${p.id}/nomor`, fd); }, 'Nomor surat terbit dan dokumen dikirim ke mitra untuk TTD');
   doIt('[data-a="bagikan"]', () => post(`/api/perjanjian/${p.id}/bagikan`), 'Perjanjian dibagikan ke mitra');
   doIt('[data-a="setujui"]', () => post(`/api/perjanjian/${p.id}/ttd-mitra/review`, { setuju: true }), 'Tanda tangan mitra disetujui');
   doIt('[data-a="tolak"]', () => post(`/api/perjanjian/${p.id}/ttd-mitra/review`, { setuju: false, alasan: $('#alasan').value }), 'Permintaan unggah ulang dikirim');
@@ -538,7 +539,7 @@ async function pagePengaturan() {
           <p class="small muted" style="margin-bottom:0">Pengguna baru mendapat password sementara yang tampil sekali.</p></form></div>
       <div class="stack">
         <div class="card"><h2 style="margin-bottom:12px">Tenggat per tahap</h2><p class="small muted" style="margin-top:0">Dalam hari kerja (Senin–Jumat).</p>
-          ${[1, 2, 3, 4, 5, 6].map((n) => `<div class="row" style="justify-content:space-between;margin-bottom:8px"><label for="sla${n}">${esc(tahapNama(n))}</label><input class="input num" id="sla${n}" type="number" min="1" max="60" value="${sla[n] ?? ''}" style="width:90px"></div>`).join('')}
+          ${[1, 2, 3, 5, 6].map((n) => `<div class="row" style="justify-content:space-between;margin-bottom:8px"><label for="sla${n}">${esc(tahapNama(n))}</label><input class="input num" id="sla${n}" type="number" min="1" max="60" value="${sla[n] ?? ''}" style="width:90px"></div>`).join('')}
           <div class="field" style="margin-top:14px"><label for="fmt">Pola nomor surat</label><input class="input" id="fmt" value="${esc(k.format_nomor)}"><span class="hint">Ekspresi reguler. Contoh: ^\\d{3}/PKS/IJE/[IVX]+/\\d{4}$</span></div>
           <div class="field"><label for="tok">Masa berlaku tautan mitra (hari)</label><input class="input" id="tok" type="number" min="1" max="90" value="${esc(k.token_hari)}"></div>
           <button class="btn" data-k>Simpan pengaturan</button></div>

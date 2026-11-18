@@ -73,27 +73,21 @@ ok(true, 'isian kuning diubah lewat aplikasi: dokumen master versi 2 tampil');
 
 console.log('\nKirim, tanggapan, Legal, bagikan (melalui tombol UI)');
 await clickText('button', 'Kirim ke mitra');
-await waitText('Menunggu tanggapan mitra');
+await waitText('Menunggu persetujuan mitra');
 ok(true, 'tombol Kirim ke mitra memindahkan ke tahap 1');
 await page.evaluate(() => document.querySelector('details.more summary').click());
 await page.type('#fb-isi', 'Mitra setuju lewat telepon');
+await page.click('#fb-setuju');
 await clickText('button', 'Catat tanggapan');
-await waitText('Mitra setuju lewat telepon');
-ok(true, 'tanggapan manual tercatat');
-await clickText('button', 'Serahkan ke Legal');
 await waitText('Terbitkan nomor surat');
-ok(true, 'diserahkan ke Legal (admin melihat form nomor)');
+ok(true, 'persetujuan mitra dicatat: otomatis diteruskan ke Legal');
 await page.type('#no', NOMOR);
-await clickText('button', 'Terbitkan nomor');
-await waitText('Bagikan perjanjian bernomor ke mitra');
-ok(true, 'nomor surat terbit lewat UI');
 const pid = detailUrl.split('/').pop();
-// Ambil tautan portal dari respons tombol bagikan
-const portalP = page.waitForResponse((r) => r.url().endsWith(`/api/perjanjian/${pid}/bagikan`));
-await clickText('button', 'Bagikan ke mitra');
+const portalP = page.waitForResponse((r) => r.url().endsWith(`/api/perjanjian/${pid}/nomor`));
+await clickText('button', 'Terbitkan nomor');
 const portal = (await (await portalP).json()).portal;
 await waitText('Menunggu tanda tangan mitra');
-ok(portal && portal.includes('#t='), 'dibagikan, tautan portal dibuat');
+ok(portal && portal.includes('#t='), 'nomor terbit lewat UI dan langsung dikirim ke mitra untuk TTD');
 
 console.log('\nPortal mitra: TTD opsi 1 (bersihkan latar, pratinjau, kirim)');
 const mp = await browser.newPage();
@@ -128,7 +122,7 @@ await (await page.$('#full')).uploadFile(resolve('test/fixtures/29hal.pdf'));
 await clickText('button', 'Unggah dan selesaikan');
 await waitText('Perjanjian ditandatangani kedua pihak');
 ok(true, 'perjanjian selesai lewat UI');
-ok((await page.$$eval('.timeline li.done', (l) => l.length)) === 8, 'linimasa menandai seluruh 8 tahap selesai');
+ok((await page.$$eval('.timeline li.done', (l) => l.length)) === 5, 'linimasa menandai seluruh 5 langkah selesai');
 await page.screenshot({ path: 'test/out/detail-selesai.png', fullPage: false });
 
 console.log('\nNavigasi lain');
@@ -139,12 +133,9 @@ ok((await page.$eval('dialog[open]', (d) => d.innerText))
   .includes(NOMOR), 'detail mitra memuat riwayat perjanjian');
 await page.keyboard.press('Escape');
 await page.goto(BASE + '/#/perjanjian', { waitUntil: 'networkidle0' });
-await clickText('.seg-toggle button', 'Kanban');
-await page.waitForSelector('.kanban .lane');
-ok((await page.$$('.kanban .lane')).length === 8, 'tampilan kanban 8 kolom tahap');
-await page.screenshot({ path: 'test/out/kanban.png' });
-await clickText('.seg-toggle button', 'Tabel');
-await page.waitForSelector('table.t #q, table.t');
+await page.waitForFunction(() => document.querySelector('#app.masuk .tabs') && document.querySelectorAll('.tabs button').length > 5, { timeout: 10000 });
+ok(!(await page.$('.kanban')) && (await page.$$eval('.tabs button', (b) => b.map((x) => x.innerText))).join('|') === 'Semua|Draf|Review mitra|Nomor surat|TTD mitra|TTD PT IJE|Selesai|Terlambat|Dibatalkan', 'daftar sederhana: filter 5 langkah, tanpa kanban');
+await page.waitForSelector('table.t');
 await page.waitForSelector('#q');
 await page.type('#q', NOMOR);
 await page.keyboard.press('Enter');

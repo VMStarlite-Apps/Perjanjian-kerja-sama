@@ -108,23 +108,22 @@ ok(mi.ok && mi.berubah.sort().join() === 'alamat,wakil', 'mitra memperbarui isia
 ok((await api('/api/portal/isian', { method: 'POST', token: tFeedback, body: { isi: { ...pv.isian.nilai, wakil: '' } } })).status === 400, 'isian kosong dari mitra ditolak');
 ok(det && (await api(`/api/perjanjian/${id}`)).email.some((e) => e.tipe === 'isian'), 'PIC VM diberi tahu bahwa mitra memperbarui isian');
 await api('/api/portal/feedback', { method: 'POST', token: tFeedback, body: { nama: 'Budi (Direktur)', isi: 'Mohon pasal 5 tentang termin pembayaran dijelaskan.' } });
+det = await api(`/api/perjanjian/${id}`);
+ok(det.tahap === 2, 'catatan mitra: tetap di langkah Review mitra');
+ok((await api(`/api/perjanjian/${id}/legal`, { method: 'POST', user: LEGAL })).status === 403, 'Legal tidak bisa meneruskan ke dirinya');
 await api('/api/portal/feedback', { method: 'POST', token: tFeedback, body: { setuju: true } });
 det = await api(`/api/perjanjian/${id}`);
-ok(det.tahap === 2 && det.feedback.length === 2 && det.feedback[1].setuju === 1, 'dua putaran feedback tercatat, tahap 2');
+ok(det.tahap === 3 && det.feedback.length === 2 && det.feedback[1].setuju === 1, 'mitra setuju: otomatis diteruskan ke Legal');
 
-console.log('\nTahap 3–4 — Legal & nomor surat');
-ok((await api(`/api/perjanjian/${id}/legal`, { method: 'POST', user: LEGAL })).status === 403, 'Legal tidak bisa menyerahkan ke dirinya');
-ok((await api(`/api/perjanjian/${id}/legal`, { method: 'POST' })).ok, 'diserahkan ke Legal');
+console.log('\nNomor surat (Legal) — otomatis dikirim ke mitra untuk TTD');
 ok((await api(`/api/perjanjian/${id}/nomor`, { method: 'POST', user: LEGAL, form: { nomor_surat: 'x' } })).status === 400, 'format nomor tidak valid ditolak');
 ok((await api(`/api/perjanjian/${id}/nomor`, { method: 'POST', user: LEGAL, form: { nomor_surat: 'N'.repeat(70) } })).status === 400, 'nomor terlalu panjang untuk kolom template ditolak');
 ok((await api(`/api/perjanjian/${id}/isian`, { method: 'POST', body: { isi: { ...ISI, jabatan: 'Direktur' } } })).status === 409, 'isian terkunci setelah diserahkan ke Legal');
 const n1 = await api(`/api/perjanjian/${id}/nomor`, { method: 'POST', user: LEGAL, form: { nomor_surat: '001/PKS/IJE/XI/2026' } });
-ok(n1.ok, 'Legal menerbitkan nomor', JSON.stringify(n1));
-
-console.log('\nTahap 5 — bagikan ke mitra');
-const b1 = await api(`/api/perjanjian/${id}/bagikan`, { method: 'POST' });
-ok(b1.ok && b1.portal, 'dibagikan, tautan TTD baru');
-const tTtd = tokenOf(b1.portal);
+ok(n1.ok && n1.otomatis && n1.portal, 'nomor terbit dan dokumen bernomor otomatis dikirim ke mitra', JSON.stringify(n1));
+det = await api(`/api/perjanjian/${id}`);
+ok(det.tahap === 5 && det.email.some((e) => e.tipe === 'bagikan'), 'langsung masuk langkah TTD mitra');
+const tTtd = tokenOf(n1.portal);
 ok((await api('/api/portal', { token: tFeedback })).status === 401, 'tautan lama otomatis dicabut');
 
 console.log('\nTahap 6 — TTD mitra (dua opsi)');
@@ -185,7 +184,7 @@ const cr2 = await api('/api/dev/cron', { method: 'POST' });
 ok(cr2.ok && !cr2.log.some((l) => l.includes(c3.id)) && cr2.log.filter((l) => l.includes('telat')).length === 0, 'pengingat tidak terkirim ganda');
 ok((await api(`/api/perjanjian/${c2.id}/batal`, { method: 'POST', body: { alasan: 'Email mitra belum tersedia' } })).ok, 'perjanjian dibatalkan dengan alasan');
 const dash = await api('/api/dashboard');
-ok(dash.kpi.berjalan === 1 && dash.kpi.telat === 1 && dash.kpi.selesai === 1 && dash.pipeline.length === 7, 'dashboard: KPI & pipeline sesuai', JSON.stringify(dash.kpi));
+ok(dash.kpi.berjalan === 1 && dash.kpi.telat === 1 && dash.kpi.selesai === 1 && dash.pipeline.length === 5, 'dashboard: KPI & pipeline sesuai', JSON.stringify(dash.kpi));
 ok(dash.tindakan.length === 1 && dash.aktivitas.length > 0, 'dashboard: tindakan & aktivitas');
 const ld = await api('/api/dashboard', { user: LEGAL });
 ok(ld.tindakan.length === 0, 'Legal hanya melihat antreannya (kosong)');

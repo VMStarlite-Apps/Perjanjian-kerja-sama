@@ -6,16 +6,25 @@ import { pageCount, stampSignature } from './pdf.js';
 import { sendMail, templates } from './mail.js';
 import { buatMaster, cetakNomor, POSISI_TTD, HALAMAN } from './template.js';
 
+// Status internal (tetap 0–7 agar data lama aman). Pengguna melihat 5 langkah sederhana (LANGKAH).
 export const TAHAP = [
-  { n: 0, key: 'draf', nama: 'Draf' },
-  { n: 1, key: 'dikirim', nama: 'Dikirim ke mitra' },
-  { n: 2, key: 'feedback', nama: 'Feedback mitra' },
-  { n: 3, key: 'di_legal', nama: 'Di Legal' },
-  { n: 4, key: 'nomor_terbit', nama: 'Nomor terbit' },
-  { n: 5, key: 'menunggu_ttd_mitra', nama: 'Menunggu TTD mitra' },
-  { n: 6, key: 'ttd_mitra_diterima', nama: 'TTD mitra diterima' },
-  { n: 7, key: 'selesai', nama: 'Selesai' },
+  { n: 0, key: 'draf', nama: 'Draf', langkah: 0 },
+  { n: 1, key: 'dikirim', nama: 'Review mitra', langkah: 1 },
+  { n: 2, key: 'feedback', nama: 'Review mitra (ada catatan)', langkah: 1 },
+  { n: 3, key: 'di_legal', nama: 'Nomor surat', langkah: 2 },
+  { n: 4, key: 'nomor_terbit', nama: 'Nomor terbit', langkah: 2 },
+  { n: 5, key: 'menunggu_ttd_mitra', nama: 'TTD mitra', langkah: 3 },
+  { n: 6, key: 'ttd_mitra_diterima', nama: 'TTD PT IJE', langkah: 4 },
+  { n: 7, key: 'selesai', nama: 'Selesai', langkah: 5 },
 ];
+export const LANGKAH = [
+  { n: 0, nama: 'Draf', tahap: [0] },
+  { n: 1, nama: 'Review mitra', tahap: [1, 2] },
+  { n: 2, nama: 'Nomor surat', tahap: [3, 4] },
+  { n: 3, nama: 'TTD mitra', tahap: [5] },
+  { n: 4, nama: 'TTD PT IJE', tahap: [6] },
+];
+const aktorDari = (u) => (typeof u === 'string' ? u : u.email);
 const PIC_TAHAP = { 1: 'mitra', 2: 'vm', 3: 'legal', 4: 'vm', 5: 'mitra', 6: 'vm' };
 const MAX_UPLOAD = 20 * 1024 * 1024;
 
@@ -209,19 +218,21 @@ export async function addFeedback(env, p, { sumber, pengirim, isi, setuju, extId
     .bind(fid, p.id, await putaran(env, p.id), sumber, pengirim || null, isi || 'Setuju tanpa catatan', setuju ? 1 : 0, extId, at).run();
   await audit(env, aktor, p.id, 'feedback_diterima', { sumber, setuju: !!setuju });
   if (p.tahap === 1) await setTahap(env, p, 2, aktor, setuju ? 'Mitra setuju tanpa catatan' : 'Feedback diterima');
+  if (setuju) await keLegal(env, aktor, p.id); // mitra setuju: langsung ke Legal
   return fid;
 }
 
 // ---------------- Tahap 3: ke Legal ----------------
 export async function keLegal(env, user, id) {
+  const aktor = aktorDari(user);
   const p = await loadP(env, id);
   need(p, 1, 2);
-  const tenggat = await setTahap(env, p, 3, user.email);
+  const tenggat = await setTahap(env, p, 3, aktor);
   const legal = (await env.DB.prepare("SELECT email FROM pks_pengguna WHERE peran = 'legal' AND aktif = 1").all()).results.map((r) => r.email);
   if (legal.length) {
     await sendMail(env, { perjanjianId: id, tipe: 'legal', to: legal, ...templates.legal({ p, m: p.mitra, tenggat, appUrl: uiUrl(env) }) }).catch(() => {});
   }
-  await audit(env, user.email, id, 'diserahkan_ke_legal', { legal });
+  await audit(env, aktor, id, 'diserahkan_ke_legal', { legal });
 }
 
 // ---------------- Tahap 4: nomor surat ----------------
@@ -244,11 +255,17 @@ export async function terbitNomor(env, user, id, form) {
   await setTahap(env, p, 4, user.email, `Nomor ${nomor}`);
   await audit(env, user.email, id, 'nomor_terbit', { nomor_surat: nomor });
   const pic = await env.DB.prepare('SELECT email FROM pks_pengguna WHERE email = ?').bind(p.pic_vm).first();
-  if (pic) await sendMail(env, { perjanjianId: id, tipe: 'nomor', to: [pic.email], ...templates.nomor({ p, m: p.mitra, appUrl: uiUrl(env) }) }).catch(() => {});
+  // Langsung dibagikan ke mitra untuk TTD. Bila gagal (mis. email mitra kosong), VM dapat mengirim ulang dari aplikasi.
+  try { return { otomatis: true, ...(await bagikan(env, user, id)) }; }
+  catch (e) {
+    if (pic) await sendMail(env, { perjanjianId: id, tipe: 'nomor', to: [pic.email], ...templates.nomor({ p, m: p.mitra, appUrl: uiUrl(env) }) }).catch(() => {});
+    return { otomatis: false, galat: e.message };
+  }
 }
 
 // ---------------- Tahap 5: bagikan ----------------
 export async function bagikan(env, user, id) {
+  const aktor = aktorDari(user);
   const p = await loadP(env, id);
   need(p, 4);
   const m = await refreshSnapshot(env, p);
@@ -258,8 +275,8 @@ export async function bagikan(env, user, id) {
   const raw = await issueToken(env, id, 'ttd');
   const tpl = templates.bagikan({ p, m, tenggat, url: portalUrl(env, raw) });
   const res = await sendMail(env, { perjanjianId: id, tipe: 'bagikan', to: m.emails, ...tpl, attachments: [{ name: `Perjanjian ${p.nomor_surat}.pdf`.replace(/[\\/]/g, '-'), mime: 'application/pdf', bytes }], threadId: p.gmail_thread_id });
-  await setTahap(env, p, 5, user.email);
-  await audit(env, user.email, id, 'dibagikan_ke_mitra', { mode: res.mode });
+  await setTahap(env, p, 5, aktor);
+  await audit(env, aktor, id, 'dibagikan_ke_mitra', { mode: res.mode });
   return { mode: res.mode, portal: env.APP_ENV === 'dev' ? portalUrl(env, raw) : undefined };
 }
 

@@ -84,3 +84,13 @@ Antarmuka (`public/`) disajikan di `https://vmstarlite-apps.github.io/Perjanjian
 Format perjanjian memakai `templates/pks-jasa.docx` (Perjanjian Pengadaan Jasa, 29 halaman). Hanya isian kuning yang dapat diisi (9 isian pada form; nomor surat dicetak otomatis oleh Legal) dan tanda tangan (halaman 19). Selebihnya terkunci.
 
 Bila template Word berubah: `python3 scripts/build-template.py` (butuh LibreOffice dan pdfplumber) membangun ulang `src/templates/pks-jasa.js` (PDF + posisi isian). Sesuaikan `POSISI_TTD` di `src/lib/template.js` bila blok tanda tangan pindah halaman.
+
+## Alur (5 langkah)
+
+1. **Draf** — VM pilih mitra dan isi bagian kuning; dokumen dibuat dari template.
+2. **Review mitra** — email berisi PDF dan tautan. Mitra mengubah bagian kuning, memberi catatan, atau menekan Setuju di aplikasi. Setuju → otomatis ke Legal.
+3. **Nomor surat** — Legal mengetik nomor → tercetak di dokumen dan otomatis dikirim ke mitra untuk TTD.
+4. **TTD mitra** — mitra unggah TTD; VM setujui atau minta ulang.
+5. **TTD PT IJE** — dokumen final dikunci, diarsipkan, dan dikirim ke mitra.
+
+Status internal tetap 0–7 di database (kompatibel data lama); `LANGKAH` di `src/lib/flow.js` memetakan ke 5 langkah.

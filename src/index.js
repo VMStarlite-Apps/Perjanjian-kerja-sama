@@ -91,7 +91,7 @@ app.post('/api/ganti-password', async (c) => {
 app.get('/api/meta', async (c) => {
   await user(c);
   const jenis = (await c.env.DB.prepare('SELECT kode, nama, masa_bulan FROM pks_jenis ORDER BY kode').all()).results;
-  return c.json({ tahap: F.TAHAP, jenis });
+  return c.json({ tahap: F.TAHAP, langkah: F.LANGKAH, jenis });
 });
 
 // Daftar isian kuning pada template (satu-satunya bagian dokumen yang dapat diisi) dan batas panjangnya.
@@ -132,7 +132,7 @@ app.get('/api/perjanjian', async (c) => {
   let sql = 'SELECT id, kode, mitra_row, snapshot_mitra, jenis, judul, nomor_surat, tahap, status, pic_vm, tenggat, tgl_efektif, tgl_berakhir, dibuat_pada, diperbarui_pada FROM pks_perjanjian WHERE 1=1';
   const b = [];
   if (q) { sql += ' AND (upper(snapshot_mitra) LIKE ? OR upper(kode) LIKE ? OR upper(COALESCE(nomor_surat,\'\')) LIKE ? OR upper(judul) LIKE ?)'; const l = `%${q.toUpperCase()}%`; b.push(l, l, l, l); }
-  if (tahap !== '') { sql += ' AND tahap = ? AND status != \'batal\''; b.push(Number(tahap)); }
+  if (tahap !== '') { const l = F.LANGKAH.find((x) => x.tahap.includes(Number(tahap))); const ts = Number(tahap) === 7 ? [7] : l ? l.tahap : [Number(tahap)]; sql += ` AND tahap IN (${ts.map(() => '?').join(',')}) AND status != 'batal'`; b.push(...ts); }
   if (status === 'batal') sql += " AND status = 'batal'";
   sql += ' ORDER BY diperbarui_pada DESC LIMIT 1000';
   const rows = (await c.env.DB.prepare(sql).bind(...b).all()).results;
@@ -248,7 +248,7 @@ app.get('/api/dashboard', async (c) => {
     .map((r) => ({ id: r.id, kode: r.kode, nomor_surat: r.nomor_surat, tgl_berakhir: r.tgl_berakhir, mitra: JSON.parse(r.snapshot_mitra).nama }));
   return c.json({
     kpi: { berjalan: berjalan.n, legal: legal.n, telat: telat.n, selesai: selesai.n }, spark, weeks,
-    pipeline: F.TAHAP.slice(1).map((s) => ({ ...s, jumlah: pipeline.find((p) => p.tahap === s.n)?.n || 0 })),
+    pipeline: [...F.LANGKAH.slice(1), { nama: 'Selesai', tahap: [7] }].map((s) => ({ n: s.tahap[0], tahap: s.tahap, nama: s.nama, jumlah: pipeline.filter((p) => s.tahap.includes(p.tahap)).reduce((a, p) => a + p.n, 0) })),
     tepat_waktu: tepat.n ? Math.round((tepat.ok / tepat.n) * 100) : null,
     tindakan, durasi, tren, pic, aktivitas, berakhir,
   });
