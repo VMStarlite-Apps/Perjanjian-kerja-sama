@@ -12,7 +12,7 @@ function makeGoogle() {
   items.set(ROOT, { id: ROOT, name: 'root', parents: [], folder: true });
   items.set('OUTSIDE', { id: 'OUTSIDE', name: 'luar', parents: [], folder: true });
   const wrap = (o) => ({
-    getId: () => o.id, isTrashed: () => !!o.trashed,
+    getId: () => o.id, getName: () => o.name, isTrashed: () => !!o.trashed,
     getParents: () => { const l = o.parents.map((p) => wrap(items.get(p))); let i = 0; return { hasNext: () => i < l.length, next: () => l[i++] }; },
     getFoldersByName(name) { const l = [...items.values()].filter((x) => x.folder && x.parents.includes(o.id) && x.name === name).map(wrap); let i = 0; return { hasNext: () => i < l.length, next: () => l[i++] }; },
     createFolder(name) { const id = 'F' + ++n; items.set(id, { id, name, parents: [o.id], folder: true }); return wrap(items.get(id)); },
@@ -33,9 +33,19 @@ function makeGoogle() {
       base64Decode: (s) => [...Buffer.from(s, 'base64')],
       base64Encode: (b) => Buffer.from(b).toString('base64'),
     },
-    Gmail: { Users: {
-      Messages: { send: (res) => { const id = 'M' + ++n; const threadId = res.threadId || 'T' + n; sent.push({ ...res, id }); return { id, threadId }; } },
-      Threads: { get: (_u, id) => threads[id] },
+    Logger: { log() {} },
+    GmailApp: { getAliases: () => [] },
+    ScriptApp: { getOAuthToken: () => 'tok' },
+    UrlFetchApp: { fetch: (url, opt) => {
+      assert.equal(opt.headers.Authorization, 'Bearer tok');
+      let code = 200, body;
+      if (url.endsWith('/messages/send') && opt.method === 'post') {
+        const res = JSON.parse(opt.payload); const id = 'a' + ++n; const threadId = res.threadId || 'f' + n;
+        sent.push({ ...res, id }); body = { id, threadId };
+      } else {
+        const m = url.match(/\/threads\/([^?]+)/); body = m && threads[m[1]]; if (!body) { code = 404; body = { error: 'not found' }; }
+      }
+      return { getResponseCode: () => code, getContentText: () => JSON.stringify(body) };
     } },
   };
   vm.createContext(g);
@@ -115,6 +125,19 @@ test('Gmail: kirim membawa raw + thread, balasan memfilter pesan sendiri', async
     assert.equal(rep.length, 1);
     assert.equal(rep[0].text, 'Setuju.');
   } finally { restore(); }
+});
+
+test('Gmail: threadId tidak valid ditolak, galat Gmail diteruskan', async () => {
+  const { g } = makeGoogle(); const restore = installFetch(g); const e = env(g);
+  try {
+    await assert.rejects(gmailThreadReplies(e, '../x', 'a@b'), /threadId tidak valid/);
+    await assert.rejects(gmailThreadReplies(e, 'abc123', 'a@b'), /Gmail 404/);
+  } finally { restore(); }
+});
+
+test('fungsi izinkan berjalan tanpa galat', () => {
+  const { g } = makeGoogle();
+  vm.runInContext('izinkan()', g);
 });
 
 test('balasan bukan JSON (mis. halaman login Google) memberi pesan jelas tanpa mengulang sia-sia', async () => {

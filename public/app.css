@@ -233,8 +233,10 @@ dialog .df { padding: 12px 22px 20px; display: flex; justify-content: flex-end; 
   .shell { grid-template-columns: minmax(0, 1fr); }
   .side { position: static; height: auto; flex-direction: row; flex-wrap: wrap; align-items: center; padding: 12px; border-right: 0; border-bottom: 1px solid var(--line); }
   .brand { padding: 0 8px 0 0; }
-  .nav-group, .side .foot { display: none; }
-  .nav { display: flex; gap: 4px; overflow-x: auto; }
+  .nav-group, .side .foot > div:first-child { display: none; }
+  .side .foot { margin: 0 0 0 auto; padding: 0; background: none; }
+  .side .foot .foot-acts { margin-top: 0; flex-wrap: nowrap; }
+  .nav { display: flex; gap: 4px; overflow-x: auto; order: 3; width: 100%; }
   .main { padding: 18px 16px 40px; }
   .dash-2, .dash-3, .detail, .ttd-stage { grid-template-columns: minmax(0, 1fr); }
   .mode-banner { border-radius: var(--r-md); }

@@ -50,9 +50,9 @@ node test/ui.mjs              # UI di Chrome nyata (27), butuh wrangler dev + Ch
 
 1. **Paket Workers berbayar disarankan** ($5/bulan). Penempelan TTD pada PDF butuh waktu CPU melebihi batas paket gratis.
 2. **Apps Script** (login sebagai `vendor.management@weave.co.id`):
-   1. script.google.com → Project baru → tempel isi `apps-script/Starlite.gs`; di Project Settings centang "Show appsscript.json" lalu samakan isinya dengan `apps-script/appsscript.json`.
+   1. script.google.com → Project baru → tempel isi `apps-script/Starlite.gs` (satu file saja). Pilih fungsi `izinkan` → Run → setujui izin Gmail dan Drive.
    2. Project Settings → Script properties → tambah `KEY` = kunci acak panjang (mis. 40 karakter).
-   3. Deploy → New deployment → Web app: *Execute as* **Me**, *Who has access* **Anyone**. Setujui izin Drive dan Gmail. Salin URL `/exec`.
+   3. Deploy → New deployment → Web app: *Execute as* **Me**, *Who has access* **Anyone**. Salin URL `/exec`.
    4. Pastikan akun itu Editor di folder Drive induk (`DRIVE_ROOT_FOLDER`).
    5. Setiap mengubah kode `.gs`: Deploy → Manage deployments → Edit → Version baru (URL tetap).
 3. Secret Worker:

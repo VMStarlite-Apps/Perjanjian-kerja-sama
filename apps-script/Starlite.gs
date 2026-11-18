@@ -2,6 +2,8 @@
  * Starlite — jembatan Google (Drive + Gmail) untuk akun vendor.management@weave.co.id
  * Dipasang sebagai Web App oleh pemilik akun tersebut. Dipanggil Worker Starlite lewat POST JSON.
  *
+ * Cukup satu file ini (tanpa appsscript.json). Deploy → Web app: Execute as "Me", Who has access "Anyone".
+ *
  * Properti Skrip (Project Settings → Script properties):
  *   KEY               wajib  kunci rahasia, sama dengan secret APPS_SCRIPT_KEY di Worker
  *   DRIVE_ROOT_FOLDER opsional  ID folder induk Drive (bawaan: folder Starlite di bawah)
@@ -43,6 +45,25 @@ function ensureFolder_(parent, name) {
   return parent.createFolder(name);
 }
 
+// Gmail REST dengan token akun pemilik skrip. Tidak perlu mengaktifkan layanan lanjutan.
+function gmailApi_(method, path, body) {
+  const opt = { method: method, headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true };
+  if (body) { opt.contentType = 'application/json'; opt.payload = JSON.stringify(body); }
+  const r = UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me' + path, opt);
+  const code = r.getResponseCode();
+  if (code >= 300) throw new Error('Gmail ' + code + ': ' + r.getContentText().slice(0, 200));
+  return JSON.parse(r.getContentText());
+}
+
+// Jalankan sekali dari editor (pilih fungsi "izinkan" → Run) untuk memberi izin Gmail dan Drive.
+// Referensi GmailApp/DriveApp di sini juga membuat Apps Script meminta izin yang dibutuhkan.
+function izinkan() {
+  Logger.log('Akun: ' + Session.getEffectiveUser().getEmail());
+  Logger.log('Alias Gmail: ' + GmailApp.getAliases().join(', '));
+  Logger.log('Folder induk: ' + DriveApp.getFolderById(root_()).getName());
+  Logger.log('KEY terpasang: ' + (prop_('KEY') ? 'ya' : 'BELUM'));
+}
+
 const actions_ = {
   ping() {
     return { email: Session.getEffectiveUser().getEmail(), root: root_() };
@@ -74,12 +95,13 @@ const actions_ = {
 
   // raw = pesan MIME base64url (dibuat Worker); kirim dari akun pemilik skrip.
   gmail_send(p) {
-    const res = Gmail.Users.Messages.send(p.threadId ? { raw: p.raw, threadId: p.threadId } : { raw: p.raw }, 'me');
+    const res = gmailApi_('post', '/messages/send', p.threadId ? { raw: p.raw, threadId: p.threadId } : { raw: p.raw });
     return { id: res.id, threadId: res.threadId };
   },
 
   gmail_thread(p) {
-    return Gmail.Users.Threads.get('me', p.threadId, { format: 'full' });
+    if (!/^[0-9a-f]+$/i.test(String(p.threadId || ''))) throw new Error('threadId tidak valid');
+    return gmailApi_('get', '/threads/' + p.threadId + '?format=full');
   },
 };
 
