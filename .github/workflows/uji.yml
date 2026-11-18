@@ -18,6 +18,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Bundel menu Perjanjian untuk dashboard VM
+        run: node scripts/bundle-dashboard.mjs && node -e "new Function(require('fs').readFileSync('dist/pks-dashboard.js','utf8'))"
       - name: Uji end-to-end (lokal)
         run: |
           cp .dev.vars.example .dev.vars

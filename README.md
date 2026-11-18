@@ -69,15 +69,16 @@ node test/ui.mjs              # UI di Chrome nyata (27), butuh wrangler dev + Ch
 
 Admin awal tersimpan di migrasi 0001 sebagai `vendormanagement@pmosurge.co.id`; ganti ke email yang dipakai: `UPDATE pks_pengguna SET email='<email-baru>' WHERE email='vendormanagement@pmosurge.co.id';` (jalankan sebelum masuk pertama). Tambahkan VM, Legal, Manajemen, dan penandatangan di menu Pengaturan.
 
-## Antarmuka di GitHub Pages
+## Antarmuka: satu aplikasi (dashboard VM)
 
-Antarmuka (`public/`) disajikan di `https://vmstarlite-apps.github.io/Perjanjian-kerja-sama/` oleh `.github/workflows/pages.yml`. Data, login, email, dan Drive tetap lewat API Worker (`APP_URL`).
+Antarmuka internal Perjanjian ada di dalam dashboard Vendor Management (`https://vendormanagementstarlite-cyber.github.io/VM_SpesialistDashbord/`), menu **Perjanjian** dengan submenu Overview, Perjanjian, dan Pengaturan. Hanya Akun Utama yang melihat menu ini; API tetap hanya menerima akun Admin.
 
-- Login dari Pages memakai token sesi di header `Authorization` (tanpa cookie lintas situs), disimpan di `sessionStorage`.
-- `CORS_ORIGIN` di `wrangler.toml` menentukan origin yang boleh memanggil API; `UI_URL` dipakai untuk tautan internal di email.
-- Portal mitra (`/portal.html`) tetap di Worker.
-- Pengaturan satu kali: repo → Settings → Pages → Source: **GitHub Actions** (repo harus Public pada akun gratis).
-- Mengganti alamat Worker: ubah `API_URL` di `pages.yml`.
+- Sumber tampilan tetap `public/app.js`, `public/ttd.js`, `public/app.css`. `node scripts/bundle-dashboard.mjs` menyusunnya menjadi `dist/pks-dashboard.js` (tampil di Shadow DOM agar gaya tidak bentrok dengan dashboard).
+- `node scripts/pasang-dashboard.mjs <path>/index.html` memasang bundel + penghubung menu (`scripts/dashboard-glue.js`) ke index.html dashboard, lalu index.html di-commit ke repo dashboard.
+- Rute memakai awalan `#/pks/…` (contoh tautan email: `…/VM_SpesialistDashbord/#/pks/perjanjian/<id>`). `UI_URL` di `wrangler.toml` menunjuk ke dashboard; `CORS_ORIGIN` hanya mengizinkan dashboard.
+- Aplikasi terpisah lama (GitHub Pages repo ini dan halaman utama Worker) hanya mengarahkan ke dashboard (`public/index.html` + `public/pindah.js`).
+- Portal mitra (`/portal.html`) dan portal Legal (`/legal.html`) tetap di Worker karena dibuka pihak luar lewat tautan email.
+- Uji di dashboard: `test/dashboard.mjs` (petunjuk di kepala berkas).
 
 ## Template dokumen
 

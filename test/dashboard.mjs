@@ -1,0 +1,105 @@
+// Uji hulu-hilir menu Perjanjian di dalam dashboard VM (Playwright) terhadap wrangler dev lokal.
+// Siapkan: DASHBOARD=/path/VM_SpesialistDashbord, .dev.vars berisi CORS_ORIGIN=http://localhost:8099,
+// node scripts/pasang-dashboard.mjs $DASHBOARD/index.html, lalu sajikan $DASHBOARD di port 8099 dan
+// buat test-local.html (index.html dengan alamat API diganti http://127.0.0.1:8787). Jalankan: node test/dashboard.mjs
+const { chromium } = require('playwright');
+let L = 0, F = 0; const ok = (c, n, x = '') => { c ? L++ : F++; console.log((c ? '  ✓ ' : '  ✗ ') + n + (c ? '' : ' ' + x)); };
+(async () => {
+  const b = await chromium.launch(); const ctx = await b.newContext({ viewport: { width: 1360, height: 900 }, acceptDownloads: true });
+  const p = await ctx.newPage(); const errs = []; p.on('pageerror', (e) => errs.push(e.message)); p.on('dialog', (d) => d.accept());
+  await ctx.route('**/*', async (r) => {
+    const u = r.request().url();
+    if (u.startsWith('http://localhost:8099') || u.startsWith('http://127.0.0.1:8787') || u.startsWith('data:') || u.startsWith('blob:')) return r.continue();
+    if (u.startsWith('https://starlite.hsans-din.workers.dev')) {
+      const req = r.request(); const h = { ...req.headers() }; delete h.origin; delete h.host;
+      const res = await fetch(u.replace('https://starlite.hsans-din.workers.dev', 'http://127.0.0.1:8787'), { method: req.method(), headers: h, body: req.postDataBuffer() || undefined });
+      const hd = {}; res.headers.forEach((v, k) => { if (!/encoding|length/.test(k)) hd[k] = v; }); hd['access-control-allow-origin'] = '*';
+      return r.fulfill({ status: res.status, headers: hd, body: Buffer.from(await res.arrayBuffer()) });
+    }
+    return r.abort();
+  });
+  const txt = () => p.evaluate(() => { const h = document.getElementById('pks-host'); return h.shadowRoot ? h.shadowRoot.querySelector('main').innerText + ' ' + [...h.shadowRoot.querySelectorAll('dialog')].map((d) => d.innerText).join(' ') : h.innerText; });
+  const tunggu = async (re, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (re.test(await txt())) return true; await p.waitForTimeout(250); } return false; };
+  const klik = async (sel) => { await p.waitForSelector('#pks-host ' + sel, { timeout: 15000 }); await p.click('#pks-host ' + sel); };
+  await p.goto('http://localhost:8099/test-local.html'); await p.waitForTimeout(2000);
+  await p.evaluate(() => { document.getElementById('login-screen')?.classList.add('hidden'); document.getElementById('app-container')?.classList.remove('hidden'); currentUser = { role: 'owner', username: 'hasanudin', name: 'Hasanudin', perms: { mainOwner: true } }; applyPermissions(); });
+  console.log('Masuk');
+  await p.click('#nav-pks');
+  ok(await tunggu(/Masuk ke Perjanjian/), 'form masuk PKS tampil di dalam dashboard');
+  await p.fill('#pks-host #l-email', 'vendormanagement@pmosurge.co.id'); await p.fill('#pks-host #l-pw', 'Uji-Starlite-2026');
+  await p.click('#pks-host [data-login] button');
+  ok(await tunggu(/Overview perjanjian/), 'masuk → Overview tampil');
+  ok(await p.evaluate(() => location.hash === '#/pks/overview'), 'alamat #/pks/overview');
+  ok(await p.evaluate(() => !document.getElementById('pks-host').shadowRoot.querySelector('.side')), 'tanpa menu PKS terpisah');
+  ok(await p.evaluate(() => getComputedStyle(document.getElementById('pks-host').shadowRoot.querySelector('.card')).borderRadius !== '0px'), 'gaya PKS terpasang terisolasi (Shadow DOM)');
+  await p.screenshot({ path: '/tmp/pk/d1-overview.png' });
+  console.log('Overview');
+  await klik('[data-a="sinkron"]'); await p.waitForTimeout(1500);
+  ok(await tunggu(/Inner City belum berperjanjian/), 'cocokkan ulang Inner City jalan');
+  console.log('Perjanjian baru');
+  await p.click('#nav-pks-list');
+  ok(await tunggu(/Perjanjian baru/), 'submenu Perjanjian → daftar');
+  ok(await p.evaluate(() => document.getElementById('nav-pks-list').getAttribute('aria-current') === 'page'), 'submenu Perjanjian tersorot');
+  await klik('[data-new]');
+  await p.waitForSelector('#pks-host dialog[open] #m-q');
+  await p.fill('#pks-host dialog #m-q', 'TRIZA'); await p.waitForTimeout(900);
+  await p.click('#pks-host dialog .picker button');
+  await p.waitForTimeout(300);
+  for (const el of await p.$$('#pks-host dialog [data-isi]')) { const v = await el.inputValue(); const ty = await el.getAttribute('type'); if (!v) await el.fill(ty === 'date' ? '2026-11-19' : 'Uji'); }
+  await p.click('#pks-host dialog [data-submit]');
+  ok(await tunggu(/Kirim dokumen ke mitra/), 'perjanjian dibuat → halaman detail');
+  ok(await p.evaluate(() => /^#\/pks\/perjanjian\/pks_/.test(location.hash)), 'alamat detail #/pks/perjanjian/ID');
+  await p.screenshot({ path: '/tmp/pk/d2-detail.png' });
+  console.log('Alur');
+  await klik('[data-a="kirim"]');
+  ok(await tunggu(/Menunggu persetujuan mitra/), 'kirim ke mitra → menunggu persetujuan');
+  await p.click('#pks-host details.more summary');
+  await p.fill('#pks-host #fb-isi', 'Setuju lewat telepon'); await p.check('#pks-host #fb-setuju');
+  await klik('[data-a="fb"]');
+  ok(await tunggu(/Terbitkan nomor surat/), 'tanggapan setuju → ke Legal');
+  await p.fill('#pks-host #no', '0' + (Date.now() % 90 + 10) + '/PKS/IJE/XI/2026');
+  await klik('[data-a="nomor"]');
+  ok(await tunggu(/Menunggu tanda tangan mitra/, 20000), 'nomor terbit → menunggu TTD mitra');
+  await p.click('#pks-host details.more summary');
+  await klik('[data-o="2"]');
+  await p.setInputFiles('#pks-host #full', process.env.SCAN29 || '/tmp/pk/scan29.pdf');
+  await klik('[data-full]');
+  ok(await tunggu(/Tanda tangan PT IJE/, 20000), 'unggah scan atas nama mitra → langsung ke TTD PT IJE');
+  await klik('[data-o="2"]');
+  const cdp = await ctx.newCDPSession(p); await cdp.send('Network.enable');
+  await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 200, downloadThroughput: -1, uploadThroughput: 120000 });
+  await p.setInputFiles('#pks-host #full', process.env.SCANBIG || '/tmp/pk/scanBig.pdf');
+  await klik('[data-full]'); await p.waitForTimeout(1200);
+  const pnl = await p.evaluate(() => ({ on: document.querySelector('.muat-unggah')?.classList.contains('on'), pct: document.querySelector('.muat-pct')?.textContent, btn: !!document.getElementById('pks-host').shadowRoot.querySelector('button.sibuk'), bar: document.querySelector('.muat-bar')?.classList.contains('on') }));
+  ok(pnl.on && /\d+%/.test(pnl.pct), 'unggah final: panel "Mengunggah… n%" tampil', JSON.stringify(pnl));
+  ok(pnl.btn, 'tombol unggah menampilkan putaran'); ok(pnl.bar, 'garis progres atas aktif');
+  await p.screenshot({ path: '/tmp/pk/d3-unggah.png' });
+  await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+  ok(await tunggu(/Perjanjian ditandatangani kedua pihak/, 30000), 'TTD PT IJE → selesai (final)');
+  await p.screenshot({ path: '/tmp/pk/d4-final.png' });
+  const pop = ctx.waitForEvent('page', { timeout: 8000 }).catch(() => null);
+  await klik('a[data-dok]'); const w = await pop;
+  ok(!!w, 'unduh dokumen final membuka berkas');
+  if (w) await w.close();
+  console.log('Pengaturan');
+  await p.click('#nav-pks-set');
+  ok(await tunggu(/Format email ke mitra/), 'submenu Pengaturan → pengaturan tampil');
+  await p.fill('#pks-host #ecc', 'cc.uji@pmosurge.co.id'); await klik('[data-e]'); await p.waitForTimeout(1200);
+  await p.click('#nav-pks-ov'); await p.waitForTimeout(800); await p.click('#nav-pks-set');
+  await tunggu(/Format email ke mitra/);
+  ok((await p.inputValue('#pks-host #ecc')) === 'cc.uji@pmosurge.co.id', 'format email tersimpan');
+  console.log('Navigasi');
+  await p.click('#nav-dashboard'); await p.waitForTimeout(400);
+  ok(await p.evaluate(() => !location.hash.startsWith('#/pks') && document.getElementById('nav-pks-sub').classList.contains('hidden')), 'pindah menu: submenu tertutup, alamat bersih');
+  await p.click('#nav-pks'); ok(await tunggu(/Overview perjanjian/), 'buka lagi tanpa masuk ulang');
+  await p.goto('http://localhost:8099/test-local.html#/pks/perjanjian'); await p.waitForTimeout(1500);
+  await p.evaluate(() => { document.getElementById('login-screen')?.classList.add('hidden'); document.getElementById('app-container')?.classList.remove('hidden'); currentUser = { role: 'owner', username: 'hasanudin', name: 'Hasanudin', perms: { mainOwner: true } }; applyPermissions(); });
+  ok(await tunggu(/Perjanjian baru/, 20000), 'tautan langsung #/pks/perjanjian + sesi diingat: langsung terbuka');
+  await klik('[data-keluar]');
+  ok(await tunggu(/Masuk ke Perjanjian/), 'Keluar → form masuk');
+  await p.evaluate(() => { currentUser = { role: 'operator', perms: {} }; applyPermissions(); });
+  ok(await p.evaluate(() => document.getElementById('nav-pks').classList.contains('hidden')), 'akun bukan utama: menu tersembunyi');
+  ok(errs.length === 0, 'tanpa error JavaScript', JSON.stringify(errs.slice(0, 3)));
+  console.log(`\nHasil: ${L} lulus, ${F} gagal`);
+  await b.close();
+})();

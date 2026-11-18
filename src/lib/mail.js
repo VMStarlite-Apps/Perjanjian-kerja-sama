@@ -34,7 +34,7 @@ export const templates = {
   }),
   nomor: ({ p, m, appUrl }) => ({
     subject: `[Starlite] Nomor surat terbit — ${p.nomor_surat}`,
-    html: layout(`<p>Legal telah menerbitkan nomor <b>${e(p.nomor_surat)}</b> untuk perjanjian dengan <b>${e(m.nama)}</b>. Silakan bagikan kembali ke mitra.</p>`, { url: `${appUrl}/#/perjanjian/${p.id}`, label: 'Bagikan ke mitra' }),
+    html: layout(`<p>Legal telah menerbitkan nomor <b>${e(p.nomor_surat)}</b> untuk perjanjian dengan <b>${e(m.nama)}</b>. Silakan bagikan kembali ke mitra.</p>`, { url: `${appUrl}/#/pks/perjanjian/${p.id}`, label: 'Bagikan ke mitra' }),
   }),
   bagikan: ({ p, m, tenggat, url }) => ({
     subject: `Penandatanganan Perjanjian No. ${p.nomor_surat} — ${m.nama}`,
@@ -56,11 +56,11 @@ export const templates = {
   }),
   pengingat_internal: ({ p, m, tahapNama, tenggat, telat, appUrl }) => ({
     subject: `[Starlite] ${telat ? 'Terlambat' : 'Tenggat dekat'} — ${p.kode} ${m.nama}`,
-    html: layout(`<p>Tahap <b>${e(tahapNama)}</b> untuk perjanjian dengan <b>${e(m.nama)}</b> ${telat ? 'melewati' : 'mendekati'} tenggat ${fmtTgl(tenggat)}.</p>`, { url: `${appUrl}/#/perjanjian/${p.id}`, label: 'Buka perjanjian' }),
+    html: layout(`<p>Tahap <b>${e(tahapNama)}</b> untuk perjanjian dengan <b>${e(m.nama)}</b> ${telat ? 'melewati' : 'mendekati'} tenggat ${fmtTgl(tenggat)}.</p>`, { url: `${appUrl}/#/pks/perjanjian/${p.id}`, label: 'Buka perjanjian' }),
   }),
   berakhir: ({ p, m, hari, appUrl }) => ({
     subject: `[Starlite] Perjanjian berakhir ${hari} hari lagi — ${p.nomor_surat}`,
-    html: layout(`<p>Perjanjian <b>No. ${e(p.nomor_surat)}</b> dengan <b>${e(m.nama)}</b> berakhir pada <b>${fmtTgl(p.tgl_berakhir)}</b>. Pertimbangkan perpanjangan atau addendum.</p>`, { url: `${appUrl}/#/perjanjian/${p.id}`, label: 'Buka perjanjian' }),
+    html: layout(`<p>Perjanjian <b>No. ${e(p.nomor_surat)}</b> dengan <b>${e(m.nama)}</b> berakhir pada <b>${fmtTgl(p.tgl_berakhir)}</b>. Pertimbangkan perpanjangan atau addendum.</p>`, { url: `${appUrl}/#/pks/perjanjian/${p.id}`, label: 'Buka perjanjian' }),
   }),
 };
 

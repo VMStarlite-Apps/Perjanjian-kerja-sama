@@ -244,7 +244,7 @@ d1("UPDATE pks_pengguna SET terkunci_sampai = NULL, gagal_login = 0 WHERE email 
 ok((await login(korban, PW)).status === 200, 'kunci terbuka setelah masa tunggu');
 
 // Frontend di domain lain (GitHub Pages): CORS + token Bearer
-const PAGES = 'https://vmstarlite-apps.github.io';
+const PAGES = 'https://vendormanagementstarlite-cyber.github.io'; // dashboard VM (satu aplikasi)
 const pre = await fetch(BASE + '/api/login', { method: 'OPTIONS', headers: { origin: PAGES, 'access-control-request-method': 'POST', 'access-control-request-headers': 'authorization,content-type' } });
 ok(pre.status === 204 && pre.headers.get('access-control-allow-origin') === PAGES && /authorization/.test(pre.headers.get('access-control-allow-headers')), 'preflight dari GitHub Pages diizinkan');
 const preAsing = await fetch(BASE + '/api/login', { method: 'OPTIONS', headers: { origin: 'https://situs-lain.example', 'access-control-request-method': 'POST' } });

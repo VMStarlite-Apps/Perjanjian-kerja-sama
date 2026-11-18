@@ -432,7 +432,7 @@ app.post('/api/portal/ttd', async (c) => {
   const f = await c.req.formData();
   await F.unggahTtdMitra(c.env, p, String(f.get('opsi')), f.get('berkas'), `mitra:${p.mitra_row}`, false);
   const pic = await c.env.DB.prepare('SELECT email FROM pks_pengguna WHERE email = ? AND aktif = 1').bind(p.pic_vm).first();
-  if (pic) await sendMail(c.env, { perjanjianId: p.id, tipe: 'ttd_masuk', to: [pic.email], subject: `[Starlite] TTD mitra masuk — ${p.nomor_surat}`, html: `<p>${escapeHtml(p.mitra.nama)} mengunggah tanda tangan untuk perjanjian ${escapeHtml(p.nomor_surat)}. Mohon diperiksa di Starlite: ${escapeHtml(uiUrl(c.env))}/#/perjanjian/${p.id}</p>` }).catch(() => {});
+  if (pic) await sendMail(c.env, { perjanjianId: p.id, tipe: 'ttd_masuk', to: [pic.email], subject: `[Starlite] TTD mitra masuk — ${p.nomor_surat}`, html: `<p>${escapeHtml(p.mitra.nama)} mengunggah tanda tangan untuk perjanjian ${escapeHtml(p.nomor_surat)}. Mohon diperiksa di dashboard Vendor Management, menu Perjanjian: ${escapeHtml(uiUrl(c.env))}/#/pks/perjanjian/${p.id}</p>` }).catch(() => {});
   return c.json({ ok: true });
 });
 

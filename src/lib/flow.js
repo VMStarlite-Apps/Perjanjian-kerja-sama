@@ -186,7 +186,7 @@ export async function ubahIsian(env, p, isi, aktor, sumber) {
   await audit(env, aktor, p.id, 'isian_diubah', { isian, berubah, sumber });
   if (sumber === 'mitra') {
     const pic = await env.DB.prepare('SELECT email FROM pks_pengguna WHERE email = ? AND aktif = 1').bind(p.pic_vm).first();
-    if (pic) await sendMail(env, { perjanjianId: p.id, tipe: 'isian', to: [pic.email], subject: `[Starlite] ${p.mitra.nama} memperbarui isian dokumen`, html: `<p>${escapeHtml(p.mitra.nama)} memperbarui isian dokumen perjanjian ${escapeHtml(p.kode)} melalui aplikasi: ${berubah.map(escapeHtml).join(', ')}. Dokumen master versi baru sudah dibuat. Periksa di: ${escapeHtml(uiUrl(env))}/#/perjanjian/${escapeHtml(p.id)}</p>` }).catch(() => {});
+    if (pic) await sendMail(env, { perjanjianId: p.id, tipe: 'isian', to: [pic.email], subject: `[Starlite] ${p.mitra.nama} memperbarui isian dokumen`, html: `<p>${escapeHtml(p.mitra.nama)} memperbarui isian dokumen perjanjian ${escapeHtml(p.kode)} melalui aplikasi: ${berubah.map(escapeHtml).join(', ')}. Dokumen master versi baru sudah dibuat. Periksa di: ${escapeHtml(uiUrl(env))}/#/pks/perjanjian/${escapeHtml(p.id)}</p>` }).catch(() => {});
   }
   return { berubah };
 }
