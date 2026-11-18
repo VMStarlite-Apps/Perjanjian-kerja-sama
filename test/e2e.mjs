@@ -166,7 +166,7 @@ const out1 = d1(`UPDATE pks_dokumen SET sha256='abc' WHERE id='${masterDoc.id}'`
 ok(/terkunci/i.test(out1), 'metadata dokumen terkunci (trigger DB)');
 const out2 = d1(`DELETE FROM pks_audit`);
 ok(/tidak dapat dihapus/i.test(out2), 'audit log tidak dapat dihapus (trigger DB)');
-d1(`UPDATE pks_blob SET data = X'00' WHERE id = (SELECT storage_id FROM pks_dokumen WHERE id='${masterDoc.id}')`);
+d1(`UPDATE pks_blob_part SET data = X'00' WHERE id = (SELECT storage_id FROM pks_dokumen WHERE id='${masterDoc.id}')`);
 const tam = await api(`/api/dokumen/${masterDoc.id}`);
 ok(tam.status === 409 && /tidak sesuai/.test(tam.error), 'berkas diubah di luar aplikasi terdeteksi "tidak sesuai"');
 ok(det.audit.length >= 15, `audit log lengkap (${det.audit.length} entri)`);
