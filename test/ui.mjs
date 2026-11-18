@@ -11,7 +11,7 @@ const page = await browser.newPage();
 await page.setViewport({ width: 1440, height: 1000 });
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
-page.on('console', (m) => { if (m.type() === 'error' && !/fonts\.g|ERR_|net::/.test(m.text())) errors.push(m.text()); });
+page.on('console', (m) => { if (m.type() === 'error' && !/fonts\.g|ERR_|net::|status of 401/.test(m.text())) errors.push(m.text()); });
 const waitText = (t, timeout = 15000) => page.waitForFunction((t) => document.body.innerText.includes(t), { timeout, polling: 250 }, t);
 const clickText = async (sel, text) => {
   await page.waitForFunction((s, t) => [...document.querySelectorAll(s)].some((e) => e.innerText.trim().includes(t)), { timeout: 15000, polling: 250 }, sel, text);
@@ -19,8 +19,24 @@ const clickText = async (sel, text) => {
 };
 
 console.log('Starlite — uji antarmuka\n');
+console.log('Masuk');
 await page.goto(BASE + '/#/perjanjian', { waitUntil: 'networkidle0' });
-ok(await page.$('table.t'), 'daftar perjanjian tampil');
+ok(await page.$('[data-login]'), 'tanpa sesi: halaman masuk tampil, tanpa menu');
+ok(await page.$eval('.side', (e) => e.hidden), 'menu samping tersembunyi sebelum masuk');
+await page.type('#l-email', 'vendormanagement@pmosurge.co.id');
+await page.type('#l-pw', 'salah-banget-12');
+await page.click('[data-login] button');
+await page.waitForFunction(() => document.querySelector('[data-err]')?.textContent.includes('Email atau password salah'), { timeout: 10000 });
+ok(true, 'password salah menampilkan pesan galat');
+await page.$eval('#l-pw', (e) => { e.value = ''; });
+await page.type('#l-pw', 'Uji-Starlite-2026');
+await page.click('[data-login] button');
+await page.waitForSelector('[data-keluar]', { timeout: 15000 });
+ok(!(await page.$eval('.side', (e) => e.hidden)), 'login benar: aplikasi terbuka');
+ok(await page.$('[data-keluar]'), 'tombol Keluar tersedia');
+
+await page.waitForFunction(() => document.querySelector('table.t, .empty'), { timeout: 15000 });
+ok(true, 'daftar perjanjian tampil');
 
 console.log('\nBuat perjanjian lewat form');
 await clickText('button', 'Perjanjian baru');

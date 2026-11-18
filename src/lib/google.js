@@ -1,80 +1,45 @@
-// Integrasi Google (OAuth refresh token akun Vendor Management): Drive untuk berkas, Gmail untuk email.
+// Integrasi Google lewat Apps Script Web App (apps-script/Starlite.gs) yang dipasang di akun
+// vendor.management@weave.co.id: Drive untuk berkas, Gmail untuk email. Worker hanya memanggil jembatan itu.
 import { b64, b64url, b64urlDecode, uid } from './util.js';
 
-let tokenCache = null;
+export const googleEnabled = (env) => !!(env.APPS_SCRIPT_URL && env.APPS_SCRIPT_KEY);
 
-export const googleEnabled = (env) => !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET && env.GOOGLE_REFRESH_TOKEN);
-
-async function accessToken(env) {
-  if (tokenCache && tokenCache.exp > Date.now() + 60_000) return tokenCache.tok;
-  const r = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: env.GOOGLE_CLIENT_ID, client_secret: env.GOOGLE_CLIENT_SECRET,
-      refresh_token: env.GOOGLE_REFRESH_TOKEN, grant_type: 'refresh_token',
-    }),
-  });
-  const j = await r.json();
-  if (!r.ok) throw new Error('Token Google gagal: ' + (j.error_description || j.error));
-  tokenCache = { tok: j.access_token, exp: Date.now() + j.expires_in * 1000 };
-  return tokenCache.tok;
-}
-
-async function gfetch(env, url, init = {}, raw = false) {
+async function bridge(env, action, payload = {}) {
+  const body = JSON.stringify({ ...payload, action, key: env.APPS_SCRIPT_KEY });
+  let lastErr;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const tok = await accessToken(env);
-    const r = await fetch(url, { ...init, headers: { ...(init.headers || {}), authorization: `Bearer ${tok}` } });
-    if (r.status === 429 || r.status >= 500) { await new Promise((s) => setTimeout(s, 400 * 2 ** attempt)); continue; }
-    if (!r.ok) throw new Error(`Google ${r.status}: ${(await r.text()).slice(0, 300)}`);
-    return raw ? r : r.json();
+    try {
+      // Apps Script membalas lewat redirect 302 ke googleusercontent; fetch mengikutinya otomatis.
+      const r = await fetch(env.APPS_SCRIPT_URL, { method: 'POST', headers: { 'content-type': 'text/plain;charset=utf-8' }, body, redirect: 'follow' });
+      const text = await r.text();
+      let j;
+      try { j = JSON.parse(text); } catch { throw Object.assign(new Error(`Jembatan Google membalas tidak valid (HTTP ${r.status}). Periksa URL Web App dan aksesnya.`), { retry: r.status === 429 || r.status >= 500 }); }
+      if (!j.ok) throw Object.assign(new Error('Google: ' + j.error), { retry: false });
+      return j.data;
+    } catch (err) {
+      lastErr = err;
+      if (err.retry === false) break;
+      await new Promise((s) => setTimeout(s, 500 * 2 ** attempt));
+    }
   }
-  throw new Error('Google sibuk, coba lagi');
+  throw lastErr;
 }
 
 // ---------- Drive ----------
-const DRIVE = 'https://www.googleapis.com/drive/v3/files';
-const q = (s) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-
-export async function driveEnsureFolder(env, parentId, name) {
-  const query = `'${parentId}' in parents and name='${q(name)}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-  const found = await gfetch(env, `${DRIVE}?q=${encodeURIComponent(query)}&fields=files(id)&supportsAllDrives=true&includeItemsFromAllDrives=true`);
-  if (found.files?.length) return found.files[0].id;
-  const created = await gfetch(env, `${DRIVE}?supportsAllDrives=true&fields=id`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] }),
-  });
-  return created.id;
-}
-
 export async function drivePath(env, segments) {
-  let parent = env.DRIVE_ROOT_FOLDER;
-  for (const s of segments) parent = await driveEnsureFolder(env, parent, s);
-  return parent;
+  return (await bridge(env, 'drive_path', { segments })).id;
 }
 
 export async function driveUpload(env, folderId, name, mime, bytes) {
-  const tok = await accessToken(env);
-  const init = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&supportsAllDrives=true&fields=id', {
-    method: 'POST',
-    headers: { authorization: `Bearer ${tok}`, 'content-type': 'application/json; charset=UTF-8', 'x-upload-content-type': mime, 'x-upload-content-length': String(bytes.length) },
-    body: JSON.stringify({ name, parents: [folderId] }),
-  });
-  if (!init.ok) throw new Error('Drive upload gagal: ' + (await init.text()).slice(0, 200));
-  const loc = init.headers.get('location');
-  const put = await fetch(loc, { method: 'PUT', headers: { 'content-type': mime }, body: bytes });
-  if (!put.ok) throw new Error('Drive upload gagal: ' + (await put.text()).slice(0, 200));
-  return (await put.json()).id;
+  return (await bridge(env, 'drive_upload', { folderId, name, mime, b64: b64(bytes) })).id;
 }
 
 export async function driveDownload(env, fileId) {
-  const r = await gfetch(env, `${DRIVE}/${fileId}?alt=media&supportsAllDrives=true`, {}, true);
-  return new Uint8Array(await r.arrayBuffer());
+  const { b64: data } = await bridge(env, 'drive_download', { id: fileId });
+  return Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
 }
 
 // ---------- Gmail ----------
-const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me';
-
 const encWord = (s) => /^[\x20-\x7e]*$/.test(s) ? s : `=?UTF-8?B?${b64(new TextEncoder().encode(s))}?=`;
 const wrap76 = (s) => s.replace(/.{1,76}/g, '$&\r\n');
 
@@ -96,10 +61,7 @@ export function buildMime({ from, to, cc = [], subject, html, attachments = [], 
 
 export async function gmailSend(env, msg, threadId) {
   const raw = b64url(new TextEncoder().encode(buildMime(msg)));
-  return gfetch(env, `${GMAIL}/messages/send`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(threadId ? { raw, threadId } : { raw }),
-  });
+  return bridge(env, 'gmail_send', { raw, threadId: threadId || null });
 }
 
 function textFromPayload(p) {
@@ -111,7 +73,7 @@ function textFromPayload(p) {
 
 /** Ambil balasan di thread yang bukan dari akun kita. */
 export async function gmailThreadReplies(env, threadId, ourAddress) {
-  const t = await gfetch(env, `${GMAIL}/threads/${threadId}?format=full`);
+  const t = await bridge(env, 'gmail_thread', { threadId });
   const out = [];
   for (const m of t.messages || []) {
     const hdr = Object.fromEntries((m.payload?.headers || []).map((x) => [x.name.toLowerCase(), x.value]));

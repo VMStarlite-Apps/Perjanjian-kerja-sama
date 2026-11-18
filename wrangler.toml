@@ -29,7 +29,8 @@ crons = ["*/15 * * * *"]
 APP_ENV = "production"
 APP_URL = "https://starlite.<subdomain>.workers.dev"
 DRIVE_ROOT_FOLDER = "1vJu2toTDvc6-ReOtxPgd-RP_ckBUw6dp"
-MAIL_FROM = "vendormanagement@pmosurge.co.id"
+MAIL_FROM = "vendor.management@weave.co.id"
 # ACCESS_TEAM_DOMAIN = "<tim>.cloudflareaccess.com"
 # ACCESS_AUD = "<audience tag aplikasi Access>"
-# Secret (wrangler secret put): GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
+# APPS_SCRIPT_URL = "https://script.google.com/macros/s/<id>/exec"   (atau lewat: wrangler secret put APPS_SCRIPT_URL)
+# Secret: wrangler secret put APPS_SCRIPT_KEY  (sama dengan properti KEY di Apps Script)

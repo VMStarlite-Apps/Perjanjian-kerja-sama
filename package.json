@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "test": "node --test test/unit.test.mjs",
+    "test": "node --test test/unit.test.mjs test/bridge.test.mjs",
     "e2e": "node test/e2e.mjs",
     "deploy": "wrangler deploy",
     "migrate:remote": "wrangler d1 migrations apply starlite-pks --remote",

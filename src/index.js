@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { HttpError, now, fail, escapeHtml } from './lib/util.js';
-import { requireUser, allow } from './lib/auth.js';
+import { requireUser, allow, cekLogin, buatSesi, akhiriSesi, cabutSemuaSesi, sesiSaatIni } from './lib/auth.js';
+import { hashPassword, verifyPassword, passwordSementara, passwordValid, POLA_PASSWORD } from './lib/password.js';
 import { listMitra, getMitra } from './lib/mitra.js';
 import { googleEnabled, gmailThreadReplies } from './lib/google.js';
 import { sendMail, templates } from './lib/mail.js';
@@ -20,13 +21,55 @@ app.use('/api/*', async (c, next) => {
   c.header('x-content-type-options', 'nosniff');
 });
 
+// Perlindungan CSRF: permintaan yang mengubah data harus berasal dari origin yang sama.
+app.use('/api/*', async (c, next) => {
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(c.req.method)) {
+    const o = c.req.header('origin');
+    if (o && new URL(o).host !== new URL(c.req.url).host) return c.json({ error: 'Permintaan ditolak (origin tidak cocok)' }, 403);
+  }
+  await next();
+});
+
 const user = (c) => requireUser(c);
 const json = async (c) => { try { return await c.req.json(); } catch { return {}; } };
 
 // ---------- Sesi & konfigurasi ----------
 app.get('/api/me', async (c) => {
-  const u = await user(c);
+  const u = await requireUser(c, { skipGanti: true });
   return c.json({ ...u, mode: { google: googleEnabled(c.env), env: c.env.APP_ENV } });
+});
+
+app.post('/api/login', async (c) => {
+  const b = await json(c);
+  let email;
+  try { email = await cekLogin(c.env, b.email, b.password); }
+  catch (err) { await F.audit(c.env, String(b.email || '').slice(0, 120).toLowerCase(), null, 'login_gagal'); throw err; }
+  await buatSesi(c, email);
+  await F.audit(c.env, email, null, 'login');
+  return c.json({ ok: true });
+});
+
+app.post('/api/logout', async (c) => {
+  let email = null;
+  try { email = (await requireUser(c, { skipGanti: true })).email; } catch {}
+  await akhiriSesi(c);
+  if (email) await F.audit(c.env, email, null, 'logout');
+  return c.json({ ok: true });
+});
+
+app.post('/api/ganti-password', async (c) => {
+  const u = await requireUser(c, { skipGanti: true });
+  const b = await json(c);
+  const row = await c.env.DB.prepare('SELECT password_hash FROM pks_pengguna WHERE email = ?').bind(u.email).first();
+  // Password sementara dari admin/secret awal: password lama = yang sedang dipakai masuk; verifikasi hanya bila ada hash.
+  if (row.password_hash && !(await verifyPassword(String(b.lama || ''), row.password_hash))) fail(400, 'Password lama salah');
+  if (!row.password_hash && !(c.env.ADMIN_PASSWORD_AWAL && String(b.lama || '') === c.env.ADMIN_PASSWORD_AWAL)) fail(400, 'Password lama salah');
+  if (!passwordValid(b.baru)) fail(400, 'Password baru tidak memenuhi syarat. ' + POLA_PASSWORD);
+  if (b.baru === b.lama) fail(400, 'Password baru harus berbeda dari yang lama');
+  await c.env.DB.prepare('UPDATE pks_pengguna SET password_hash = ?, wajib_ganti = 0, gagal_login = 0, terkunci_sampai = NULL WHERE email = ?').bind(await hashPassword(b.baru), u.email).run();
+  await cabutSemuaSesi(c.env, u.email, await sesiSaatIni(c));
+  await F.audit(c.env, u.email, null, 'password_diganti');
+  return c.json({ ok: true });
 });
 
 app.get('/api/meta', async (c) => {
@@ -170,7 +213,7 @@ app.get('/api/dashboard', async (c) => {
   const durasi = await all('SELECT tahap, ROUND(AVG(julianday(selesai) - julianday(mulai)), 1) hari, COUNT(*) n FROM pks_tahap WHERE selesai IS NOT NULL AND tahap BETWEEN 1 AND 6 GROUP BY tahap');
   const tren = await all("SELECT m, SUM(masuk) masuk, SUM(selesai) selesai FROM (SELECT substr(dibuat_pada,1,7) m, 1 masuk, 0 selesai FROM pks_perjanjian UNION ALL SELECT substr(mulai,1,7), 0, 1 FROM pks_tahap WHERE tahap = 7) WHERE m >= ? GROUP BY m ORDER BY m", new Date(Date.now() - 180 * 86400_000).toISOString().slice(0, 7));
   const pic = await all("SELECT p.pic_vm email, COALESCE(u.nama, p.pic_vm) nama, COUNT(*) n FROM pks_perjanjian p LEFT JOIN pks_pengguna u ON u.email = p.pic_vm WHERE p.status != 'batal' AND p.tahap BETWEEN 1 AND 6 GROUP BY p.pic_vm ORDER BY n DESC");
-  const aktivitas = (await all("SELECT a.waktu, a.aktor, u.nama aktor_nama, a.aksi, p.kode, p.snapshot_mitra, p.id FROM pks_audit a LEFT JOIN pks_perjanjian p ON p.id = a.perjanjian_id LEFT JOIN pks_pengguna u ON u.email = a.aktor WHERE a.aksi NOT LIKE 'dokumen_diunduh%' ORDER BY a.id DESC LIMIT 7"))
+  const aktivitas = (await all("SELECT a.waktu, a.aktor, u.nama aktor_nama, a.aksi, p.kode, p.snapshot_mitra, p.id FROM pks_audit a LEFT JOIN pks_perjanjian p ON p.id = a.perjanjian_id LEFT JOIN pks_pengguna u ON u.email = a.aktor WHERE a.aksi NOT LIKE 'dokumen_diunduh%' AND a.aksi NOT LIKE 'login%' AND a.aksi NOT LIKE 'logout%' ORDER BY a.id DESC LIMIT 7"))
     .map((r) => ({ waktu: r.waktu, aktor: r.aktor, aktor_nama: r.aktor_nama, aksi: r.aksi, kode: r.kode, id: r.id, mitra: r.snapshot_mitra ? JSON.parse(r.snapshot_mitra).nama : null }));
   const berakhir = (await all("SELECT id, kode, nomor_surat, snapshot_mitra, tgl_berakhir FROM pks_perjanjian WHERE tahap = 7 AND status != 'batal' AND tgl_berakhir <= date('now','+90 day') ORDER BY tgl_berakhir LIMIT 8"))
     .map((r) => ({ id: r.id, kode: r.kode, nomor_surat: r.nomor_surat, tgl_berakhir: r.tgl_berakhir, mitra: JSON.parse(r.snapshot_mitra).nama }));
@@ -199,10 +242,30 @@ app.post('/api/admin/pengguna', async (c) => {
   const email = String(b.email || '').trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) fail(400, 'Email tidak valid');
   if (!['admin', 'vm', 'legal', 'manajemen'].includes(b.peran)) fail(400, 'Peran tidak valid');
+  if (email === u.email && (b.aktif === false || b.peran !== 'admin')) fail(400, 'Anda tidak dapat menonaktifkan atau menurunkan peran akun sendiri');
+  const ada = await c.env.DB.prepare('SELECT email FROM pks_pengguna WHERE email = ?').bind(email).first();
   await c.env.DB.prepare('INSERT INTO pks_pengguna (email, nama, peran, penandatangan, aktif) VALUES (?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET nama=excluded.nama, peran=excluded.peran, penandatangan=excluded.penandatangan, aktif=excluded.aktif')
     .bind(email, String(b.nama || email).trim(), b.peran, b.penandatangan ? 1 : 0, b.aktif === false ? 0 : 1).run();
+  if (b.aktif === false) await cabutSemuaSesi(c.env, email);
+  let password_awal = null;
+  if (!ada) {
+    password_awal = passwordSementara();
+    await c.env.DB.prepare('UPDATE pks_pengguna SET password_hash = ?, wajib_ganti = 1 WHERE email = ?').bind(await hashPassword(password_awal), email).run();
+  }
   await F.audit(c.env, u.email, null, 'pengguna_disimpan', { email, peran: b.peran });
-  return c.json({ ok: true });
+  return c.json({ ok: true, password_awal });
+});
+
+app.post('/api/admin/pengguna/reset', async (c) => {
+  const u = await user(c); allow(u);
+  const email = String((await json(c)).email || '').trim().toLowerCase();
+  const ada = await c.env.DB.prepare('SELECT email FROM pks_pengguna WHERE email = ?').bind(email).first();
+  if (!ada) fail(404, 'Pengguna tidak ditemukan');
+  const password_awal = passwordSementara();
+  await c.env.DB.prepare('UPDATE pks_pengguna SET password_hash = ?, wajib_ganti = 1, gagal_login = 0, terkunci_sampai = NULL WHERE email = ?').bind(await hashPassword(password_awal), email).run();
+  await cabutSemuaSesi(c.env, email);
+  await F.audit(c.env, u.email, null, 'password_direset', { email });
+  return c.json({ ok: true, password_awal });
 });
 
 app.post('/api/admin/konfig', async (c) => {

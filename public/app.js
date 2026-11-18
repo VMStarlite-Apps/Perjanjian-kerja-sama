@@ -12,7 +12,10 @@ async function api(path, opts = {}) {
   const ct = r.headers.get('content-type') || '';
   if (r.ok && ct.includes('application/pdf')) return r.blob();
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || `Permintaan gagal (${r.status})`);
+  if (!r.ok) {
+    if (r.status === 401 && !path.startsWith('/api/login') && S.me) { S.me = null; showLogin('Sesi berakhir, silakan masuk lagi.'); }
+    throw Object.assign(new Error(j.error || `Permintaan gagal (${r.status})`), { status: r.status });
+  }
   return j;
 }
 const post = (p, body) => api(p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) });
@@ -83,7 +86,84 @@ function renderNav(active) {
   const items = [['#/', 'home', 'Ringkasan', 'home'], ['#/perjanjian', 'file', 'Perjanjian', 'perjanjian'], ['#/mitra', 'users', 'Mitra', 'mitra']];
   if (can()) items.push(['#/pengaturan', 'gear', 'Pengaturan', 'pengaturan']);
   $('#nav').innerHTML = items.map(([h, i, l, k]) => `<a href="${h}" ${k === active ? 'aria-current="page"' : ''}>${ic(i)}<span>${l}</span></a>`).join('');
-  $('#foot').innerHTML = S.me.mode.google ? `Terhubung ke <b>Google Drive</b> dan <b>Gmail</b>` : `<b>Mode pengembangan</b><br>Email disimulasikan, berkas disimpan sementara.`;
+  $('#foot').innerHTML = `<div>${S.me.mode.google ? 'Terhubung ke <b>Google Drive</b> dan <b>Gmail</b>' : '<b>Mode pengembangan</b><br>Email disimulasikan, berkas disimpan sementara.'}</div>
+    <div class="foot-acts"><button class="btn ghost sm" data-ganti type="button">Ganti password</button><button class="btn ghost sm" data-keluar type="button">Keluar</button></div>`;
+  $('[data-keluar]').addEventListener('click', keluar);
+  $('[data-ganti]').addEventListener('click', () => bukaGanti(false));
+}
+
+// ---------- Masuk, keluar, ganti password ----------
+function shell(tampil) { $('.side').hidden = !tampil; $('.shell').classList.toggle('tanpa-menu', !tampil); }
+
+function showLogin(pesan = '') {
+  shell(false);
+  app.innerHTML = `<div class="login"><form class="card login-card" data-login novalidate>
+    <img src="/logo.png" alt="" class="login-logo"><h1>Masuk ke Starlite</h1><p class="muted">Pemantauan perjanjian kerja sama mitra</p>
+    <p class="login-err" role="alert" data-err>${esc(pesan)}</p>
+    <div class="field"><label for="l-email">Email</label><input class="input" id="l-email" name="email" type="email" autocomplete="username" required autofocus></div>
+    <div class="field"><label for="l-pw">Password</label><input class="input" id="l-pw" name="password" type="password" autocomplete="current-password" required></div>
+    <button class="btn" style="width:100%;justify-content:center">Masuk</button></form></div>`;
+  const f = $('[data-login]');
+  f.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const err = $('[data-err]');
+    err.textContent = '';
+    busy($('button', f), async () => {
+      try { await post('/api/login', { email: f.email.value, password: f.password.value }); }
+      catch (ex) { err.textContent = ex.message; f.password.value = ''; f.password.focus(); return; }
+      await mulai();
+    });
+  });
+}
+
+function formGanti(wajib) {
+  return `<form data-gf class="stack" novalidate>
+    ${wajib ? '<p class="muted" style="margin-top:0">Password Anda masih sementara. Buat password baru untuk melanjutkan.</p>' : ''}
+    <p class="login-err" role="alert" data-err></p>
+    <div class="field"><label for="g-lama">Password ${wajib ? 'sementara' : 'lama'}</label><input class="input" id="g-lama" name="lama" type="password" autocomplete="current-password" required></div>
+    <div class="field"><label for="g-baru">Password baru</label><input class="input" id="g-baru" name="baru" type="password" autocomplete="new-password" required minlength="10"><span class="hint">Minimal 10 karakter.</span></div>
+    <div class="field"><label for="g-ulang">Ulangi password baru</label><input class="input" id="g-ulang" name="ulang" type="password" autocomplete="new-password" required></div>
+    <button class="btn">Simpan password</button></form>`;
+}
+function ikatGanti(root, selesai) {
+  const f = $('[data-gf]', root), err = $('[data-err]', root);
+  f.addEventListener('submit', (e) => {
+    e.preventDefault(); err.textContent = '';
+    if (f.baru.value !== f.ulang.value) { err.textContent = 'Pengulangan password tidak sama'; return; }
+    busy($('button', f), async () => {
+      try { await post('/api/ganti-password', { lama: f.lama.value, baru: f.baru.value }); }
+      catch (ex) { err.textContent = ex.message; return; }
+      toast('Password diganti'); selesai();
+    });
+  });
+}
+function layarGanti() {
+  shell(false);
+  app.innerHTML = `<div class="login"><div class="card login-card"><h1>Buat password baru</h1>${formGanti(true)}</div></div>`;
+  ikatGanti(app, () => mulai());
+}
+function bukaGanti(wajib) {
+  const dlg = document.createElement('dialog');
+  dlg.innerHTML = `<div class="dh"><h2>Ganti password</h2><button class="icon-btn" data-x aria-label="Tutup" type="button">✕</button></div><div class="db" style="padding-bottom:20px">${formGanti(wajib)}</div>`;
+  document.body.append(dlg); dlg.showModal();
+  dlg.addEventListener('close', () => dlg.remove());
+  $('[data-x]', dlg).addEventListener('click', () => dlg.close());
+  ikatGanti(dlg, () => dlg.close());
+}
+async function keluar() {
+  try { await post('/api/logout'); } catch {}
+  S.me = null; showLogin('Anda sudah keluar.');
+}
+function tampilkanPassword(email, password) {
+  const dlg = document.createElement('dialog');
+  dlg.innerHTML = `<div class="dh"><h2>Password sementara</h2></div>
+    <div class="db"><p>Berikan kepada <b>${esc(email)}</b>. Password ini hanya tampil sekali dan wajib diganti saat masuk pertama.</p>
+    <p><code class="pw" data-pw>${esc(password)}</code></p></div>
+    <div class="df"><button class="btn ghost" data-salin type="button">Salin</button><button class="btn" data-x type="button">Selesai</button></div>`;
+  document.body.append(dlg); dlg.showModal();
+  dlg.addEventListener('close', () => dlg.remove());
+  $('[data-x]', dlg).addEventListener('click', () => dlg.close());
+  $('[data-salin]', dlg).addEventListener('click', () => navigator.clipboard?.writeText(password).then(() => toast('Disalin')));
 }
 
 function topbar(title, sub, telat = 0) {
@@ -415,7 +495,8 @@ async function pagePengaturan() {
           <div class="row"><div class="field" style="flex:1"><label for="u-email">Email</label><input class="input" id="u-email" name="email" type="email" required placeholder="nama@pmosurge.co.id"></div><div class="field" style="flex:1"><label for="u-nama">Nama</label><input class="input" id="u-nama" name="nama" required></div></div>
           <div class="row"><div class="field" style="flex:1"><label for="u-peran">Peran</label><select class="input" id="u-peran" name="peran"><option value="vm">Vendor Management</option><option value="legal">Legal</option><option value="manajemen">Manajemen</option><option value="admin">Admin</option></select></div>
             <label class="row small"><input type="checkbox" name="penandatangan"> Penandatangan PT IJE</label><label class="row small"><input type="checkbox" name="aktif" checked> Aktif</label></div>
-          <button class="btn">Simpan pengguna</button></form></div>
+          <div class="df"><button class="btn">Simpan pengguna</button><button class="btn ghost" type="button" data-reset>Reset password</button></div>
+          <p class="small muted" style="margin-bottom:0">Pengguna baru mendapat password sementara yang tampil sekali.</p></form></div>
       <div class="stack">
         <div class="card"><h2 style="margin-bottom:12px">Tenggat per tahap</h2><p class="small muted" style="margin-top:0">Dalam hari kerja (Senin–Jumat).</p>
           ${[1, 2, 3, 4, 5, 6].map((n) => `<div class="row" style="justify-content:space-between;margin-bottom:8px"><label for="sla${n}">${esc(tahapNama(n))}</label><input class="input num" id="sla${n}" type="number" min="1" max="60" value="${sla[n] ?? ''}" style="width:90px"></div>`).join('')}
@@ -431,7 +512,13 @@ async function pagePengaturan() {
   bindSearch();
   const uf = $('[data-uf]');
   $$('tr[data-u]').forEach((tr) => tr.addEventListener('click', () => { const u = d.pengguna[tr.dataset.u]; uf.email.value = u.email; uf.nama.value = u.nama; uf.peran.value = u.peran; uf.penandatangan.checked = !!u.penandatangan; uf.aktif.checked = !!u.aktif; uf.nama.focus(); }));
-  uf.addEventListener('submit', (e) => { e.preventDefault(); busy(e.submitter, async () => { await post('/api/admin/pengguna', { email: uf.email.value, nama: uf.nama.value, peran: uf.peran.value, penandatangan: uf.penandatangan.checked, aktif: uf.aktif.checked }); toast('Pengguna disimpan'); pagePengaturan(); }); });
+  uf.addEventListener('submit', (e) => { e.preventDefault(); busy(e.submitter, async () => { const r = await post('/api/admin/pengguna', { email: uf.email.value, nama: uf.nama.value, peran: uf.peran.value, penandatangan: uf.penandatangan.checked, aktif: uf.aktif.checked }); toast('Pengguna disimpan'); await pagePengaturan(); if (r.password_awal) tampilkanPassword(uf.email.value.trim().toLowerCase(), r.password_awal); }); });
+  $('[data-reset]', uf).addEventListener('click', (e) => {
+    const em = uf.email.value.trim().toLowerCase();
+    if (!d.pengguna.some((u) => u.email === em)) { toast('Pilih pengguna yang sudah ada dari daftar', true); return; }
+    if (!confirm(`Reset password ${em}? Sesi aktifnya akan diakhiri.`)) return;
+    busy(e.currentTarget, async () => { const r = await post('/api/admin/pengguna/reset', { email: em }); tampilkanPassword(em, r.password_awal); });
+  });
   $('[data-k]').addEventListener('click', (e) => busy(e.currentTarget, async () => {
     const s = {}; [1, 2, 3, 4, 5, 6].forEach((n) => { const v = Number($(`#sla${n}`).value); if (v) s[n] = v; });
     await post('/api/admin/konfig', { sla_hari_kerja: JSON.stringify(s), format_nomor: $('#fmt').value, token_hari: $('#tok').value }); toast('Pengaturan disimpan');
@@ -465,13 +552,18 @@ async function route() {
   window.scrollTo(0, 0);
 }
 
-(async function init() {
+async function mulai() {
   try {
-    [S.me, S.meta] = await Promise.all([api('/api/me'), api('/api/meta')]);
+    S.me = await api('/api/me');
   } catch (e) {
-    app.innerHTML = `<div class="card" style="max-width:520px;margin:10vh auto"><div class="empty"><b>Tidak dapat masuk</b>${esc(e.message)}</div></div>`;
+    if (e.status === 401) { showLogin(); return; }
+    app.innerHTML = `<div class="card" style="max-width:520px;margin:10vh auto"><div class="empty"><b>Tidak dapat memuat Starlite</b>${esc(e.message)}</div></div>`;
     return;
   }
-  window.addEventListener('hashchange', route);
+  if (S.me.wajib_ganti) { layarGanti(); return; }
+  S.meta = await api('/api/meta');
+  shell(true);
+  if (!mulai.terikat) { window.addEventListener('hashchange', () => S.me && route()); mulai.terikat = true; }
   route();
-})();
+}
+mulai();

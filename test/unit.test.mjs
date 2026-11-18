@@ -54,3 +54,20 @@ test('mapMitra: kolom NULL menjadi kosong, status default', () => {
   const m = mapMitra({ source_row: 400, nama_perusahaan: 'PT LENTERA DIGITAL NUSANTARA', nama_singkat: 'LENTERA', jenis_mitra: 'ISP Akuisisi', email: null, status_mitra: null, alamat: 'NULL' });
   assert.equal(m.alamat, ''); assert.deepEqual(m.emails, []); assert.equal(m.status, 'Tanpa status');
 });
+
+import { hashPassword, verifyPassword, passwordSementara, passwordValid } from '../src/lib/password.js';
+test('password: hash unik per garam, verifikasi benar/salah, format rusak ditolak', async () => {
+  const a = await hashPassword('Rahasia-12345'), b = await hashPassword('Rahasia-12345');
+  assert.notEqual(a, b);
+  assert.ok(a.startsWith('pbkdf2$100000$'));
+  assert.equal(await verifyPassword('Rahasia-12345', a), true);
+  assert.equal(await verifyPassword('rahasia-12345', a), false);
+  assert.equal(await verifyPassword('x', 'bukan-hash'), false);
+  assert.equal(await verifyPassword('x', null), false);
+});
+test('password sementara: 12 karakter tanpa karakter ambigu; aturan minimal 10', () => {
+  const p = passwordSementara();
+  assert.match(p, /^[A-HJ-NP-Za-km-z2-9]{12}$/);
+  assert.equal(passwordValid('123456789'), false);
+  assert.equal(passwordValid('1234567890'), true);
+});

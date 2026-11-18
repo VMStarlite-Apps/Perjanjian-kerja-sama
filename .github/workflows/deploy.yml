@@ -37,11 +37,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Migrasi starlite-pks
-        run: npx wrangler d1 migrations apply starlite-pks --remote
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # Migrasi skema dijalankan manual di Console D1 (0001 sudah diterapkan di sana, tidak tercatat di d1_migrations).
       - name: Deploy Worker
         run: npx wrangler deploy
         env:

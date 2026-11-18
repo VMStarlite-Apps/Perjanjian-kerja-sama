@@ -172,5 +172,63 @@ ok(ld.tindakan.length === 0, 'Legal hanya melihat antreannya (kosong)');
 const list = await api('/api/perjanjian?q=TRIZA');
 ok(list._json.length === 1 && list._json[0].tampil === 'terlambat', 'pencarian & status tampil "terlambat"');
 
+console.log('\nLogin (database Cloudflare)');
+const PW = 'Uji-Starlite-2026';
+const login = (email, password, extra = {}) => fetch(BASE + '/api/login', { method: 'POST', headers: { 'content-type': 'application/json', ...extra }, body: JSON.stringify({ email, password }) });
+const cookieOf = (r) => (r.headers.get('set-cookie') || '').split(';')[0];
+const withCookie = (ck, path, init = {}) => fetch(BASE + path, { ...init, headers: { cookie: ck, ...(init.headers || {}) } });
+ok((await fetch(BASE + '/api/me')).status === 401, 'tanpa sesi: /api/me = 401');
+const salah = await login(ADMIN, 'salah-banget-12');
+ok(salah.status === 401 && (await salah.json()).error === 'Email atau password salah', 'password salah ditolak dengan pesan umum');
+const takAda = await login('tidak.ada@x.id', 'salah-banget-12');
+ok(takAda.status === 401 && (await takAda.json()).error === 'Email atau password salah', 'email tak terdaftar: pesan sama (tidak membocorkan akun)');
+const asing = await login(ADMIN, PW, { origin: 'https://situs-lain.example' });
+ok(asing.status === 403, 'permintaan dari origin lain ditolak (CSRF)');
+const lg = await login(ADMIN, PW);
+const ck = cookieOf(lg);
+ok(lg.status === 200 && ck.startsWith('starlite_sesi=') && /httponly/i.test(lg.headers.get('set-cookie')) && /samesite=lax/i.test(lg.headers.get('set-cookie')), 'login benar: cookie sesi HttpOnly + SameSite=Lax');
+ok((await (await withCookie(ck, '/api/me')).json()).peran === 'admin', 'sesi cookie dikenali');
+ok(!JSON.stringify(await (await withCookie(ck, '/api/admin')).json()).includes('password_hash'), 'hash password tidak pernah dikirim ke klien');
+const rawDb = d1("SELECT id FROM pks_sesi");
+ok(!rawDb.includes(ck.split('=')[1]), 'token sesi tidak disimpan polos di database');
+
+// Pengguna baru: password sementara, wajib ganti
+const baru = 'staf.baru@pmosurge.co.id';
+const mk = await api('/api/admin/pengguna', { method: 'POST', body: { email: baru, nama: 'Staf Baru', peran: 'vm' } });
+ok(mk.ok && typeof mk.password_awal === 'string' && mk.password_awal.length === 12, 'admin membuat pengguna → password sementara tampil sekali');
+const l2 = await login(baru, mk.password_awal), ck2 = cookieOf(l2);
+const me2 = await (await withCookie(ck2, '/api/me')).json();
+ok(l2.status === 200 && me2.wajib_ganti === 1, 'pengguna baru wajib ganti password');
+ok((await withCookie(ck2, '/api/perjanjian')).status === 403, 'sebelum ganti password, fitur lain terkunci');
+const gp = (ck, lama, baruPw) => withCookie(ck, '/api/ganti-password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ lama, baru: baruPw }) });
+ok((await gp(ck2, 'bukan-lama-123', 'PasswordBaru-2026')).status === 400, 'ganti password: password lama salah ditolak');
+ok((await gp(ck2, mk.password_awal, 'pendek')).status === 400, 'ganti password: password pendek ditolak');
+ok((await gp(ck2, mk.password_awal, 'PasswordBaru-2026')).status === 200, 'ganti password berhasil');
+ok((await withCookie(ck2, '/api/perjanjian')).status === 200, 'setelah ganti password, akses normal');
+ok((await login(baru, mk.password_awal)).status === 401 && (await login(baru, 'PasswordBaru-2026')).status === 200, 'password sementara tidak berlaku lagi');
+
+// Reset & penonaktifan mengakhiri sesi
+const ck3 = cookieOf(await login(baru, 'PasswordBaru-2026'));
+const rs = await api('/api/admin/pengguna/reset', { method: 'POST', body: { email: baru } });
+ok(rs.ok && rs.password_awal && (await withCookie(ck3, '/api/me')).status === 401, 'reset password mengakhiri semua sesi pengguna');
+const ck4 = cookieOf(await login(baru, rs.password_awal));
+await api('/api/admin/pengguna', { method: 'POST', body: { email: baru, nama: 'Staf Baru', peran: 'vm', aktif: false } });
+ok((await withCookie(ck4, '/api/me')).status === 401 && (await login(baru, rs.password_awal)).status === 401, 'pengguna dinonaktifkan: sesi berakhir dan tidak bisa masuk');
+ok((await api('/api/admin/pengguna', { method: 'POST', body: { email: ADMIN, nama: 'x', peran: 'vm' } })).status === 400, 'admin tidak bisa menurunkan perannya sendiri');
+
+// Penguncian setelah 5 kali gagal
+const korban = 'direksi.uji@pmosurge.co.id';
+for (let i = 0; i < 5; i++) await login(korban, 'tebakan-salah-' + i);
+const kunci = await login(korban, PW);
+ok(kunci.status === 429, 'akun terkunci setelah 5 kali gagal (walau password benar)');
+d1("UPDATE pks_pengguna SET terkunci_sampai = NULL, gagal_login = 0 WHERE email = 'direksi.uji@pmosurge.co.id'");
+ok((await login(korban, PW)).status === 200, 'kunci terbuka setelah masa tunggu');
+
+// Keluar
+const out = await withCookie(ck, '/api/logout', { method: 'POST' });
+ok(out.status === 200 && (await withCookie(ck, '/api/me')).status === 401, 'keluar: sesi dihapus di server');
+const jejak = d1("SELECT aksi FROM pks_audit WHERE aksi LIKE 'login%' OR aksi LIKE 'password%' OR aksi='logout'");
+ok(/login_gagal/.test(jejak) && /password_diganti/.test(jejak) && /logout/.test(jejak), 'kejadian login tercatat di audit log');
+
 console.log(`\nHasil: ${pass} lulus, ${failN} gagal`);
 process.exit(failN ? 1 : 0);

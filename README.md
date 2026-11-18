@@ -21,9 +21,8 @@ Aplikasi Vendor Management PT Integrasi Jaringan Ekosistem untuk memantau perjan
 - **Cloudflare Workers** (`src/`) — API (Hono) + aset statis (`public/`) + cron 15 menit (pengingat, balasan email).
 - **D1 `starlite-pks`** — seluruh data Starlite (tabel `pks_*`). Migrasi di `migrations/`.
 - **D1 `starlite-vm`** — hanya **dibaca**, khusus tabel `mitra` (info perseroan). Kode menolak perintah selain `SELECT` ke database ini.
-- **Google Drive** — penyimpanan berkas, folder `{Mitra}/{Kode}/{01 Master … 05 Final}` di bawah folder induk.
-- **Gmail API** — email dari akun Vendor Management, balasan dibaca per thread.
-- **Cloudflare Access** — login Google domain perusahaan; JWT diverifikasi di Worker.
+- **Apps Script Web App** (`apps-script/Starlite.gs`) — jembatan ke Google di akun `vendor.management@weave.co.id`: berkas ke Google Drive (`{Mitra}/{Kode}/{01 Master … 05 Final}` di bawah folder induk) dan email lewat Gmail; balasan mitra dibaca per thread.
+- **Login** — email + password di tabel `pks_pengguna` (D1 `starlite-pks`), hash PBKDF2-SHA256, sesi cookie HttpOnly (token di-hash di `pks_sesi`), kunci akun 15 menit setelah 5 kali gagal. Tanpa Cloudflare Access.
 
 Integritas: setiap berkas dicatat SHA-256; metadata dokumen dan audit log dikunci trigger database; berkas yang berubah di luar aplikasi ditandai "tidak sesuai".
 
@@ -37,32 +36,35 @@ npx wrangler dev              # http://127.0.0.1:8787
 node scripts/demo.mjs         # opsional: data demo semua tahap
 ```
 
-Mode dev: email disimulasikan dan berkas disimpan di tabel `pks_blob` (maks 1,9 MB).
+Mode dev: email disimulasikan dan berkas disimpan di tabel `pks_blob` (maks 1,9 MB). Semua pengguna uji berpassword `Uji-Starlite-2026`.
 
 ## Pengujian
 
 ```bash
-npm test                      # unit (7)
-node test/e2e.mjs             # alur penuh API + keamanan (54), butuh wrangler dev
-node test/ui.mjs              # UI di Chrome nyata (22), butuh wrangler dev + Chrome
+npm test                      # unit + jembatan Apps Script (16)
+node test/e2e.mjs             # alur penuh API + keamanan + login (77), butuh wrangler dev
+node test/ui.mjs              # UI di Chrome nyata (27), butuh wrangler dev + Chrome
 ```
 
 ## Deploy
 
 1. **Paket Workers berbayar disarankan** ($5/bulan). Penempelan TTD pada PDF butuh waktu CPU melebihi batas paket gratis.
-2. Secret Worker:
+2. **Apps Script** (login sebagai `vendor.management@weave.co.id`):
+   1. script.google.com → Project baru → tempel isi `apps-script/Starlite.gs`; di Project Settings centang "Show appsscript.json" lalu samakan isinya dengan `apps-script/appsscript.json`.
+   2. Project Settings → Script properties → tambah `KEY` = kunci acak panjang (mis. 40 karakter).
+   3. Deploy → New deployment → Web app: *Execute as* **Me**, *Who has access* **Anyone**. Setujui izin Drive dan Gmail. Salin URL `/exec`.
+   4. Pastikan akun itu Editor di folder Drive induk (`DRIVE_ROOT_FOLDER`).
+   5. Setiap mengubah kode `.gs`: Deploy → Manage deployments → Edit → Version baru (URL tetap).
+3. Secret Worker:
    ```bash
-   npx wrangler secret put GOOGLE_CLIENT_ID
-   npx wrangler secret put GOOGLE_CLIENT_SECRET
-   npx wrangler secret put GOOGLE_REFRESH_TOKEN
+   npx wrangler secret put APPS_SCRIPT_URL      # URL /exec
+   npx wrangler secret put APPS_SCRIPT_KEY      # sama dengan properti KEY
+   npx wrangler secret put ADMIN_PASSWORD_AWAL  # password masuk pertama admin (wajib diganti saat masuk)
    ```
-   Refresh token dari akun `vendormanagement@pmosurge.co.id` dengan scope `https://www.googleapis.com/auth/drive`, `gmail.send`, `gmail.readonly`.
-3. Isi `APP_URL`, `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD` di `wrangler.toml`.
-4. Cloudflare Access: aplikasi untuk domain Starlite (izinkan `@pmosurge.co.id`), plus kebijakan **Bypass** untuk portal mitra: `/portal.html`, `/portal.js`, `/ttd.js`, `/app.css`, `/logo.png`, `/favicon.png`, `/api/portal*`.
-5. `npx wrangler deploy` — atau push ke `main` (GitHub Actions, butuh secret `CLOUDFLARE_API_TOKEN` dan `CLOUDFLARE_ACCOUNT_ID`).
-
-Skema `starlite-pks` sudah diterapkan di Cloudflare (migrasi `0001_init.sql` tercatat di `d1_migrations`).
+4. Terapkan migrasi login ke `starlite-pks`: jalankan isi `migrations/0002_login.sql` di Console D1 (0001 sudah diterapkan lewat Console, jadi jangan pakai `migrations apply`).
+5. Isi `APP_URL` di `wrangler.toml`, lalu `npx wrangler deploy` (atau push ke `main` → GitHub Actions, butuh secret `CLOUDFLARE_API_TOKEN` dan `CLOUDFLARE_ACCOUNT_ID`).
+6. Masuk dengan email admin + `ADMIN_PASSWORD_AWAL`, ganti password, lalu tambah pengguna di Pengaturan (password sementara tampil sekali). Disarankan menambah aturan *Rate limiting* Cloudflare untuk `/api/login`.
 
 ## Pengguna
 
-Admin awal: `vendormanagement@pmosurge.co.id`. Tambahkan VM, Legal, Manajemen, dan penandatangan di menu Pengaturan.
+Admin awal tersimpan di migrasi 0001 sebagai `vendormanagement@pmosurge.co.id`; ganti ke email yang dipakai: `UPDATE pks_pengguna SET email='<email-baru>' WHERE email='vendormanagement@pmosurge.co.id';` (jalankan sebelum masuk pertama). Tambahkan VM, Legal, Manajemen, dan penandatangan di menu Pengaturan.
