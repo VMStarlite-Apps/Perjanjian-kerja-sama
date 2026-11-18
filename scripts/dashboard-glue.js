@@ -26,7 +26,8 @@
     if (!sama) location.hash = hash;
     if (!M.mounted || sama) { M.mounted = true; window.pksMount(g('pks-host')); }
   }
-  window.pksToggle = function () { buka('#/pks/overview'); };
+  // klik menu: bila sudah di dalam menu Perjanjian, submenu dibuka/ditutup; bila belum, masuk ke Overview dan submenu terbuka
+  window.pksToggle = function () { if (M.aktif && utama()) { M.open = !M.open; menuSet(); } else buka('#/pks/overview'); };
   window.pksSub = function (k) { buka({ ov: '#/pks/overview', list: '#/pks/perjanjian', set: '#/pks/pengaturan' }[k] || '#/pks/overview'); };
   // tautan langsung (mis. dari email): #/pks/perjanjian/ID
   window.addEventListener('hashchange', function () {

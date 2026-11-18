@@ -293,7 +293,7 @@ async function openCreate(preset) {
         ${S.tpl.fields.map((f) => `<div class="field"><label for="i-${f.key}">${esc(f.label)}</label><input class="input" id="i-${f.key}" data-isi="${f.key}" ${f.type === 'date' ? 'type="date" min="2026-01-01" max="2026-12-31"' : `type="text" maxlength="${S.tpl.maks[f.key] || 120}" autocomplete="off"`} required>${f.hint ? `<span class="hint">${esc(f.hint)}</span>` : ''}</div>`).join('')}
       </fieldset>
     </div>
-    <div class="df"><button class="btn ghost" value="cancel" formnovalidate>Batal</button><button class="btn" value="ok" data-submit>Buat perjanjian</button></div></form>`;
+    <div class="df"><button class="btn ghost" value="cancel" formnovalidate>Batal</button><button class="btn ghost" type="button" data-pvisi>Pratinjau dokumen</button><button class="btn" value="ok" data-submit>Buat perjanjian</button></div></form>`;
   document.body.append(dlg); dlg.showModal();
   dlg.addEventListener('close', () => dlg.remove());
   let chosen = null, timer;
@@ -313,6 +313,7 @@ async function openCreate(preset) {
   };
   qi.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => load(qi.value.trim()), 220); });
   if (preset) choose(preset); else load('');
+  $('[data-pvisi]', dlg).addEventListener('click', () => { if ($('[data-f]', dlg).reportValidity()) pratinjauIsi(dlg); });
   $('[data-submit]', dlg).addEventListener('click', async (e) => {
     e.preventDefault();
     const f = $('[data-f]', dlg);
@@ -324,6 +325,24 @@ async function openCreate(preset) {
   });
 }
 
+// ---------- Pratinjau dokumen (PDF) di dalam aplikasi ----------
+function pratinjau(ambil, judul) {
+  const dlg = document.createElement('dialog'); dlg.className = 'pv';
+  dlg.innerHTML = `<div class="dh"><h2>Pratinjau: ${esc(judul)}</h2><button class="icon-btn" type="button" data-tutup aria-label="Tutup">✕</button></div><div class="pv-isi"><div class="pv-muat"><span class="muat-putar"></span>Menyiapkan pratinjau…</div></div>`;
+  document.body.append(dlg); dlg.showModal();
+  let url = null;
+  const tutup = () => dlg.close();
+  $('[data-tutup]', dlg).addEventListener('click', tutup);
+  dlg.addEventListener('close', () => { if (url) URL.revokeObjectURL(url); dlg.remove(); });
+  (async () => {
+    try {
+      const b = await ambil(); url = URL.createObjectURL(b);
+      $('.pv-isi', dlg).innerHTML = `<iframe class="pv-frame" title="Pratinjau dokumen" src="${url}#view=FitH"></iframe>`;
+    } catch (e) { console.error('pratinjau', e); $('.pv-isi', dlg).innerHTML = `<div class="empty">${esc(e.message || 'Pratinjau gagal dimuat')}</div>`; }
+  })();
+}
+const pratinjauIsi = (dlg) => pratinjau(() => api('/api/pratinjau', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ isi: Object.fromEntries($$('[data-isi]', dlg).map((el) => [el.dataset.isi, el.value])) }) }), 'dokumen perjanjian (belum disimpan)');
+
 // ---------- Ubah isian kuning pada dokumen ----------
 async function bukaIsian(p, reload) {
   let nilai;
@@ -332,9 +351,10 @@ async function bukaIsian(p, reload) {
   dlg.innerHTML = `<form method="dialog" data-f><div class="dh"><h2>Ubah isian dokumen</h2><button class="icon-btn" value="cancel" aria-label="Tutup" formnovalidate>✕</button></div>
     <div class="db"><p class="hint" style="margin:0 0 12px">Hanya bagian kuning pada dokumen yang dapat diubah. Menyimpan membuat dokumen master versi baru.</p>
     ${S.tpl.fields.map((f) => `<div class="field"><label for="u-${f.key}">${esc(f.label)}</label><input class="input" id="u-${f.key}" data-isi="${f.key}" ${f.type === 'date' ? 'type="date" min="2026-01-01" max="2026-12-31"' : `type="text" maxlength="${S.tpl.maks[f.key] || 120}" autocomplete="off"`} value="${esc(nilai[f.key])}" required></div>`).join('')}</div>
-    <div class="df"><button class="btn ghost" value="cancel" formnovalidate>Batal</button><button class="btn" data-simpan>Simpan isian</button></div></form>`;
+    <div class="df"><button class="btn ghost" value="cancel" formnovalidate>Batal</button><button class="btn ghost" type="button" data-pvisi>Pratinjau dokumen</button><button class="btn" data-simpan>Simpan isian</button></div></form>`;
   document.body.append(dlg); dlg.showModal();
   dlg.addEventListener('close', () => dlg.remove());
+  $('[data-pvisi]', dlg).addEventListener('click', () => { if ($('[data-f]', dlg).reportValidity()) pratinjauIsi(dlg); });
   $('[data-simpan]', dlg).addEventListener('click', (e) => {
     e.preventDefault();
     if (!$('[data-f]', dlg).reportValidity()) return;
@@ -360,7 +380,7 @@ async function pageDetail(id) {
   }).join('');
   const docs = p.dokumen.length ? `<ul class="list docs">${p.dokumen.map((d) => `<li><span class="fi">${ic('file')}</span><div style="min-width:0"><div class="t">${esc(JENIS_DOK[d.jenis])}, versi ${d.versi}</div><div class="s">${tgl(d.dibuat_pada)} oleh ${esc(aktor(d.pengunggah, d.pengunggah_nama))}${d.halaman ? `, ${d.halaman} halaman` : ''} <span class="hash" title="SHA-256 ${esc(d.sha256)}">#${esc(d.sha256.slice(0, 10))}</span></div></div>
     <span>${d.penanda ? `<span class="chip ${d.penanda === 'scan_asli' ? 'c-ok' : 'c-info'}">${d.penanda === 'scan_asli' ? 'Scan asli' : 'Hasil tempel'}</span>` : ''} ${d.status !== 'aktif' ? `<span class="chip ${d.status === 'tidak_sesuai' ? 'c-late' : d.status === 'menunggu_review' ? 'c-warn' : 'c-idle'}">${{ tidak_sesuai: 'Tidak sesuai', menunggu_review: 'Menunggu review', ditolak: 'Ditolak' }[d.status]}</span>` : ''}</span>
-    <a class="btn ghost sm" href="#" data-dok="${d.id}">${ic('download')}Buka</a></li>`).join('')}</ul>` : '<div class="empty">Belum ada dokumen</div>';
+    <span class="row" style="gap:6px;flex-wrap:nowrap"><a class="btn ghost sm" href="#" data-dok="${d.id}" data-lihat="1">${ic('file')}Pratinjau</a><a class="btn ghost sm" href="#" data-dok="${d.id}">${ic('download')}Buka</a></span></li>`).join('')}</ul>` : '<div class="empty">Belum ada dokumen</div>';
   const ubahIsian = can('vm') && p.status !== 'batal' && p.tahap <= 2 ? `<div style="margin-top:12px"><button class="btn ghost sm" data-isian type="button">${ic('file')}Ubah isian dokumen</button><div class="hint" style="margin-top:6px">Hanya bagian kuning pada dokumen yang dapat diubah.</div></div>` : '';
   const fb = p.feedback.length ? p.feedback.map((f) => `<div class="fb ${f.setuju ? 'agree' : ''}"><div class="small"><b>Putaran ${f.putaran}</b> <span class="muted">dari ${esc(f.pengirim || 'mitra')} via ${esc(f.sumber)}, ${jam(f.diterima_pada)}</span></div><p>${esc(f.isi)}</p></div>`).join('') : '<div class="empty">Belum ada tanggapan mitra</div>';
   app.innerHTML = `<div class="crumb"><a href="#/perjanjian">Perjanjian</a> / ${esc(p.kode)}</div>
@@ -691,6 +711,7 @@ document.addEventListener('click', async (e) => {
   const a = e.target.closest('[data-dok]');
   if (!a) return;
   e.preventDefault();
+  if (a.dataset.lihat) { pratinjau(() => api(`/api/dokumen/${a.dataset.dok}`), a.closest('li')?.querySelector('.t')?.textContent || 'Dokumen'); return; }
   const w = window.open('', '_blank');
   try { const b = await api(`/api/dokumen/${a.dataset.dok}`); const u = URL.createObjectURL(b); if (w) w.location = u; else location.href = u; }
   catch (ex) { w?.close(); toast(ex.message, true); }

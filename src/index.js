@@ -6,6 +6,7 @@ import { listMitra, getMitra } from './lib/mitra.js';
 import { googleEnabled, gmailThreadReplies } from './lib/google.js';
 import { sendMail, templates } from './lib/mail.js';
 import * as K from './lib/kelompok.js';
+import { buatMaster } from './lib/template.js';
 import * as F from './lib/flow.js';
 import * as L from './lib/legal.js';
 import { FIELDS, HALAMAN, batasKarakter } from './lib/template.js';
@@ -30,13 +31,10 @@ const originBoleh = (env, o) => !!o && String(env.CORS_ORIGIN || '').split(',').
 app.use('/api/*', async (c, next) => {
   const o = c.req.header('origin');
   const boleh = originBoleh(c.env, o);
-  if (boleh) {
-    c.header('access-control-allow-origin', o);
-    c.header('vary', 'Origin');
-    c.header('access-control-expose-headers', 'content-disposition');
-  }
   if (c.req.method === 'OPTIONS') {
     if (!boleh) return c.body(null, 403);
+    c.header('access-control-allow-origin', o);
+    c.header('vary', 'Origin');
     c.header('access-control-allow-methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
     c.header('access-control-allow-headers', 'authorization,content-type,x-portal-token,x-legal-sesi,x-vm-token');
     c.header('access-control-max-age', '600');
@@ -46,6 +44,12 @@ app.use('/api/*', async (c, next) => {
   if (c.req.method !== 'GET' && c.req.method !== 'HEAD' && o && !boleh && new URL(o).host !== new URL(c.req.url).host)
     return c.json({ error: 'Permintaan ditolak (origin tidak cocok)' }, 403);
   await next();
+  // Header CORS dipasang SETELAH handler: respons mentah (PDF/berkas) tidak membawa header yang diset sebelum next().
+  if (boleh) {
+    c.res.headers.set('access-control-allow-origin', o);
+    c.res.headers.append('vary', 'Origin');
+    c.res.headers.set('access-control-expose-headers', 'content-disposition');
+  }
 });
 
 const user = (c) => requireUser(c);
@@ -100,6 +104,13 @@ app.get('/api/meta', async (c) => {
 app.get('/api/template', async (c) => {
   await user(c);
   return c.json({ fields: FIELDS, maks: await batasKarakter(), halaman: HALAMAN });
+});
+
+// Pratinjau dokumen master dari isian kuning (tidak disimpan).
+app.post('/api/pratinjau', async (c) => {
+  const u = await user(c); allow(u, 'vm');
+  const { bytes } = await buatMaster((await json(c)).isi || {});
+  return new Response(bytes, { headers: { 'content-type': 'application/pdf', 'content-disposition': 'inline; filename="pratinjau.pdf"', 'cache-control': 'no-store' } });
 });
 
 app.get('/api/perjanjian/:id/isian', async (c) => { await user(c); return c.json(await F.isianTerkini(c.env, c.req.param('id'))); });

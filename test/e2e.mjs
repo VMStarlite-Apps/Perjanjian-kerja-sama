@@ -257,6 +257,10 @@ const mb = await bearer('/api/me');
 ok(mb.status === 200 && (await mb.json()).peran === 'admin' && mb.headers.get('access-control-allow-origin') === PAGES, 'sesi Bearer dikenali');
 ok((await bearer('/api/admin/pengguna/reset', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status !== 403, 'POST dari origin Pages tidak ditolak CSRF');
 ok((await fetch(BASE + '/api/me', { headers: { origin: PAGES, authorization: 'Bearer salah' } })).status === 401, 'token Bearer salah ditolak');
+const pdfCors = await bearer(`/api/dokumen/${final.id}`);
+ok(pdfCors.status === 200 && pdfCors.headers.get('access-control-allow-origin') === PAGES && /pdf/.test(pdfCors.headers.get('content-type')), 'PDF dokumen dari dashboard: header CORS ikut terkirim');
+const pvc = await bearer("/api/pratinjau", { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ isi: {} }) });
+ok([200, 400, 422].includes(pvc.status) && pvc.headers.get('access-control-allow-origin') === PAGES, 'pratinjau dari dashboard: CORS benar');
 const kel = await bearer('/api/logout', { method: 'POST' });
 ok(kel.status === 200 && (await bearer('/api/me')).status === 401, 'keluar dengan Bearer mencabut sesi');
 

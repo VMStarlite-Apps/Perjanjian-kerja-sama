@@ -281,6 +281,13 @@ dialog form[data-f] .db { overflow: auto; }
 .shell.tanpa-menu .main { padding: 0; }
 .login { width: 100%; }
 
+/* ---------- Pratinjau dokumen ---------- */
+dialog.pv { width: min(1000px, 96vw); height: 92vh; max-height: 92vh; display: none; flex-direction: column; }
+dialog.pv[open] { display: flex; }
+dialog.pv .pv-isi { flex: 1; min-height: 0; padding: 0 12px 12px; display: flex; }
+dialog.pv .pv-frame { flex: 1; width: 100%; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+dialog.pv .pv-muat { margin: auto; display: flex; gap: 10px; align-items: center; color: var(--muted, #5b6b7d); }
+dialog.pv .pv-muat .muat-putar { position: static; display: inline-block; }
 /* ---------- Indikator proses (muat.js) ---------- */
 .muat-bar { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 200; overflow: hidden; opacity: 0; transition: opacity .2s ease; pointer-events: none; }
 .muat-bar.on { opacity: 1; }
