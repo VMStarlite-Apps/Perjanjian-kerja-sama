@@ -270,5 +270,14 @@ ok(out.status === 200 && (await withCookie(ck, '/api/me')).status === 401, 'kelu
 const jejak = d1("SELECT aksi FROM pks_audit WHERE aksi LIKE 'login%' OR aksi LIKE 'password%' OR aksi='logout'");
 ok(/login_gagal/.test(jejak) && /password_diganti/.test(jejak) && /logout/.test(jejak), 'kejadian login tercatat di audit log');
 
+// ---- Kirim ke semua mitra info perseroan (bukan hanya Inner City) ----
+await api('/api/overview/sinkron', { method: 'POST', body: {} });
+const om = (await api('/api/overview/mitra'))._json;
+ok(Array.isArray(om) && om.length >= 10 && om.some((m) => m.row === 900 && !m.inner_city && m.ada_email && m.status === 'belum_ada'), 'daftar kirim memuat semua mitra info perseroan dengan penanda Inner City');
+ok(om.some((m) => m.inner_city) && om.some((m) => m.row === 901 && !m.ada_email), 'penanda Inner City dan email kosong ada');
+const ks = await api('/api/overview/kirim-sekaligus', { method: 'POST', body: { rows: [900, 901], batas: 4 } });
+ok(ks.hasil.find((h) => h.row === 900)?.ok === true && ks.hasil.find((h) => h.row === 901)?.ok === false, 'kirim sekaligus ke mitra bukan Inner City berhasil; tanpa email ditolak');
+const om2 = (await api('/api/overview/mitra'))._json;
+ok(om2.find((m) => m.row === 900).status === 'proses', 'mitra non Inner City kini berstatus proses');
 console.log(`\nHasil: ${pass} lulus, ${failN} gagal`);
 process.exit(failN ? 1 : 0);

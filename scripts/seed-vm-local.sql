@@ -13,3 +13,6 @@ INSERT INTO mitra VALUES
  (358,'KRESA UTAMA MANDIRI','PT. KRESA UTAMA MANDIRI','Local Mitra','Tangerang','Direktur Uji','0812','kum@kresa.test','','Aktif'),
  (271,'SALWA CITRA MANDIRI','PT SALWA CITRA MANDIRI','Local Mitra','Bogor','Direktur Uji','0812','project@salwa.test','','Aktif'),
  (316,'TELKOM AKSES','PT TELKOM AKSES','Local Mitra','Jakarta','Direktur Uji','0812','loly@telkomakses.test','','Tidak Aktif');
+INSERT INTO mitra VALUES
+ (900,'MITRA UJI NON INNER','PT MITRA UJI NON INNER','Local Mitra','Surabaya','Direktur Uji','0812','uji@nonic.test','','Aktif'),
+ (901,'MITRA UJI TANPA EMAIL','PT MITRA UJI TANPA EMAIL','Local Mitra','Medan',NULL,NULL,NULL,NULL,'Aktif');

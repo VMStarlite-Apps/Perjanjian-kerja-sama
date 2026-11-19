@@ -86,3 +86,16 @@ export async function overview(env, { jenis = '' } = {}) {
   const pipeline = [0, 1, 2, 3, 4, 5, 6, 7].map((n) => ({ tahap: n, jumlah: semua.filter((x) => x.tahap === n).length }));
   return { total: INNER_CITY.length, tersinkron: acuan.length > 0, hitung, daftar, semua, kpi, pipeline };
 }
+
+// Seluruh mitra di info perseroan + penanda Inner City + status perjanjian terbarunya (untuk daftar kirim sekaligus).
+export async function daftarMitra(env) {
+  const mitra = await listMitra(env, { limit: 5000 });
+  const ic = new Set((await env.DB.prepare("SELECT source_row FROM pks_mitra_kelompok WHERE kelompok = 'inner_city' AND source_row IS NOT NULL").all()).results.map((r) => r.source_row));
+  const rows = (await env.DB.prepare("SELECT id, mitra_row, tahap, tgl_berakhir FROM pks_perjanjian WHERE status != 'batal' ORDER BY dibuat_pada DESC").all()).results;
+  const today = hariIni();
+  return mitra.map((m) => {
+    const ps = rows.filter((r) => r.mitra_row === m.row);
+    const p = ps.find((r) => r.tahap === 7) || ps[0] || null;
+    return { row: m.row, nama: m.nama, jenis: m.jenis, status_mitra: m.status, ada_email: m.emails.length > 0, inner_city: ic.has(m.row), status: statusKontrak(p, today), perjanjian_id: p ? p.id : null };
+  });
+}

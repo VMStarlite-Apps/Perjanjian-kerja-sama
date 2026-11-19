@@ -44,9 +44,13 @@ const cssMuat = potong > 0 ? css.slice(potong) : '';
 if (potong > 0) css = css.slice(0, potong);
 css = scopeCss(css.replace(/\/\*[\s\S]*?\*\//g, ''), ':host');
 // penyesuaian di dalam dashboard: tanpa latar penuh/tinggi layar, dialog tetap terbaca di mode gelap dashboard
-css += `:host{display:block;background:var(--canvas,#F3F5F8);color:var(--ink,#1D2A3A);font-family:'Plus Jakarta Sans',system-ui,sans-serif;font-size:14px;line-height:1.5;border-radius:20px;min-height:0;color-scheme:light}
-.main{padding:22px 24px 36px;min-height:60vh}.top{flex-wrap:wrap;row-gap:12px}.top .greet{flex:1 1 100%}.top .search{flex:1 1 260px;width:auto}.pks-akun{display:flex;gap:6px;align-items:center}.login{min-height:60vh}
-@media (max-width:640px){.main{padding:16px 12px 28px}}
+css += `:host{display:block;background:transparent;color:var(--ink,#1D2A3A);font-family:inherit;font-size:14px;line-height:1.5;border-radius:0;min-height:0;color-scheme:light}
+.main{padding:0;min-height:60vh;outline:none}.main:focus,.main:focus-visible{outline:none}
+.top{flex-wrap:wrap;row-gap:10px;margin-bottom:16px;gap:10px}.top .greet{flex:1 1 220px}.top .greet h1{font-size:20px;margin:0}.top .search{flex:0 1 320px;width:auto}.login{min-height:60vh}
+@media (max-width:640px){.top .search{flex:1 1 100%}}
+:host(.gelap){color-scheme:dark;--surface:#111c2f;--canvas:#0b1424;--line:#26354d;--ink:#E5ECF6;--muted:#93A4BA;--navy:#A9D1FF;--navy-2:#8dbbf0;--sky:#1b3454;--ok:#4cd39a;--ok-bg:#12372b;--warn:#f0b255;--warn-bg:#3a2b10;--late:#ff8585;--late-bg:#3d1b1d;--idle:#9fb0c6;--idle-bg:#1d2a3f;--shadow:none}
+:host(.gelap) .input,:host(.gelap) input,:host(.gelap) select,:host(.gelap) textarea{background:#0e1829;color:var(--ink);border-color:var(--line)}
+:host(.gelap) .btn.ghost{color:var(--ink)}
 `;
 
 // ---------- JS ----------
@@ -86,8 +90,15 @@ app = ganti(app, `<button class="btn" style="width:100%;justify-content:center">
 app = ganti(app, 'tokenSet(r.token); }', 'tokenSet(r.token, f.ingat?.checked); }');
 app = ganti(app, '<h1>Masuk ke Starlite</h1><p class="muted">Pemantauan perjanjian kerja sama mitra</p>', '<h1>Masuk ke Perjanjian</h1><p class="muted">Gunakan akun Admin aplikasi Perjanjian.</p>');
 // akun (ganti password/keluar) pindah ke bilah atas
-app = ganti(app, `<div class="who"><div class="avatar">\${esc(ini)}</div><div><b>\${esc(S.me.nama)}</b><span>\${esc(S.me.peran === 'vm' ? 'Vendor Management' : S.me.peran)}</span></div></div>`,
-  `<div class="who"><div class="avatar">\${esc(ini)}</div><div><b>\${esc(S.me.nama)}</b><span>\${esc(S.me.peran === 'vm' ? 'Vendor Management' : S.me.peran)}</span></div></div><a class="icon-btn" href="#/pks/pengaturan" aria-label="Pengaturan" title="Pengaturan">\${ic('gear')}</a>`);
+// bilah atas ringkas (dashboard sudah punya header, pengguna, dan lonceng): hanya judul, pencarian, dan ikon Pengaturan
+{
+  const a0 = app.indexOf('<a class="icon-btn" href="#/pks/perjanjian?status=terlambat"');
+  const a1 = a0 < 0 ? -1 : app.indexOf('</a>', a0) + 4;
+  const w0 = app.indexOf('<div class="who">', a1);
+  const w1 = app.indexOf('</div></div>', w0) + '</div></div>'.length;
+  if (a0 < 0 || w0 < 0) throw new Error('topbar: pola tidak ditemukan');
+  app = app.slice(0, a0) + '<a class="icon-btn" href="#/pks/pengaturan" aria-label="Pengaturan" title="Pengaturan">${ic("gear")}</a>' + app.slice(w1);
+}
 app = ganti(app, "function bindSearch() {", "function bindSearch() {\n  $('[data-keluar]')?.addEventListener('click', keluar);\n  $('[data-ganti]')?.addEventListener('click', () => bukaGanti(false));");
 app = ganti(app, "if (!mulai.terikat) { window.addEventListener('hashchange', () => S.me && route()); mulai.terikat = true; }",
   "if (!mulai.terikat) { window.addEventListener('hashchange', () => { if (S.me && /^#\\/pks/.test(location.hash) && ROOT && ROOT.isConnected) route(); }); mulai.terikat = true; }");
@@ -140,6 +151,7 @@ window.pksMount = function (host) {
     ROOT.innerHTML = '<style>' + CSS + '</style><main class="main" tabindex="-1"></main>';
     app = ROOT.querySelector('.main');
     ROOT.addEventListener('click', __dokKlik);
+    { const gelap = () => host.classList.toggle('gelap', document.documentElement.classList.contains('dark')); gelap(); new MutationObserver(gelap).observe(document.documentElement, { attributes: true, attributeFilter: ['class'] }); }
     __amatiTombol();
     if (!document.getElementById('pks-font')) { const l = document.createElement('link'); l.id = 'pks-font'; l.rel = 'stylesheet'; l.href = 'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap'; document.head.appendChild(l); }
     return mulai();

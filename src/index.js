@@ -292,12 +292,13 @@ app.get('/api/overview', async (c) => {
   const k = c.req.query('jenis') || '';
   return c.json({ jenis, ...(await K.overview(c.env, { jenis: k })) });
 });
+app.get('/api/overview/mitra', async (c) => { const u = await user(c); allow(u); return c.json(await K.daftarMitra(c.env)); });
 app.post('/api/overview/kirim-sekaligus', async (c) => {
   const u = await user(c); allow(u);
   const b = await json(c);
-  const rows = Array.isArray(b.rows) ? b.rows.map(Number).filter(Boolean) : null;
+  const rows = Array.isArray(b.rows) ? b.rows.map(Number).filter(Boolean).slice(0, 1000) : null;
   const lewati = Array.isArray(b.lewati) ? b.lewati.map(Number).filter(Boolean).slice(0, 500) : [];
-  return c.json({ ok: true, ...(await F.kirimInnerCity(c.env, u, { rows, batas: Number(b.batas) || 4, lewati })) });
+  return c.json({ ok: true, ...(await F.kirimMitra(c.env, u, { rows, batas: Number(b.batas) || 4, lewati })) });
 });
 app.post('/api/overview/arsip-semua', async (c) => {
   const u = await user(c); allow(u);

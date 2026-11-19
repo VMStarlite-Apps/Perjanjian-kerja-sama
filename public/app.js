@@ -566,7 +566,6 @@ async function pageOverview(params) {
       <div class="field" style="margin:0"><label for="ovj">Perjanjian</label><select class="input" id="ovj">${opsi.map(([v, l]) => `<option value="${esc(v)}" ${v === jenis ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
       <div class="field" style="margin:0"><label for="ovk">Kelompok mitra</label><select class="input" id="ovk"><option value="">Semua mitra</option><option value="inner" ${kel === 'inner' ? 'selected' : ''}>Inner City (${d.total})</option><option value="lain" ${kel === 'lain' ? 'selected' : ''}>Di luar Inner City</option></select></div>
       <button class="btn ghost" data-a="sinkron">Cocokkan ulang Inner City</button>
-      <button class="btn" data-a="sekaligus">Kirim ke semua Inner City yang belum</button>
       <button class="btn ghost" data-a="arsipsemua">Arsipkan semua yang final</button></div>
       ${d.tersinkron ? '' : '<p class="muted" style="margin-top:12px">Inner City belum dicocokkan ke info perseroan. Tekan "Cocokkan ulang Inner City".</p>'}
       ${jenis === 'HOMEPASS' ? '<p class="muted" style="margin-top:12px">Template Perjanjian Homepass belum dipasang, jadi belum ada perjanjian jenis ini.</p>' : ''}</div>
@@ -575,7 +574,8 @@ async function pageOverview(params) {
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px">${OV_LANGKAH.map(([n, ts]) => { const j = d.pipeline.filter((x) => ts.includes(x.tahap)).reduce((a, x) => a + x.jumlah, 0); return `<div><div class="num" style="font-size:22px;font-weight:700">${j}</div><div style="height:8px;border-radius:4px;background:var(--line,#dfe5ee);margin:6px 0"><div style="height:100%;width:${Math.round((j / maks) * 100)}%;max-width:100%;border-radius:4px;background:${n === 'Selesai' ? 'var(--ok,#17885A)' : 'var(--blue,#2F9BEF)'}"></div></div><small class="muted">${esc(n)}</small></div>`; }).join('')}</div></div>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-bottom:16px;align-items:start">
       <div class="card"><div class="card-head"><h2>Perlu perhatian</h2></div>${perhatian.length ? `<ul class="list" style="list-style:none;padding:0;margin:0;display:grid;gap:10px">${perhatian.map((x) => `<li style="display:flex;justify-content:space-between;gap:8px"><a href="#/perjanjian/${x.id}">${esc(x.mitra)}<br><small class="muted">${esc(x.nomor_surat || x.kode)}</small></a><span class="chip ${OV_STATUS[x.status]?.[1] || 'c-late'}">${x.tahap < 7 && x.status !== 'berakhir' ? 'Lewat tenggat' : OV_STATUS[x.status][0]}${x.tgl_berakhir ? ' ' + tgl(x.tgl_berakhir) : ''}</span></li>`).join('')}</ul>` : '<p class="muted">Tidak ada yang perlu perhatian.</p>'}</div>
-      <div class="card"><div class="card-head"><h2>Inner City belum berperjanjian</h2><span class="muted">${belum.length} dari ${d.total}</span></div>${belum.length ? `<div style="max-height:260px;overflow:auto;display:grid;gap:6px">${belum.map((r) => `<div style="display:flex;justify-content:space-between;gap:8px">${esc(r.mitra?.nama || r.acuan)}<span style="display:flex;gap:6px;align-items:center"><span class="chip ${OV_STATUS[r.status][1]}" style="white-space:normal">${r.status === 'tidak_ketemu' ? 'Tidak di info perseroan' : 'Belum ada'}</span>${r.status === 'belum_ada' && r.mitra ? (r.mitra.ada_email === false ? '<span class="chip c-warn" title="Lengkapi email di info perseroan">Email kosong</span>' : `<button class="btn ghost sm" data-satu="${r.mitra.row}" type="button">Kirim</button>`) : ''}</span></div>`).join('')}</div>` : '<p class="muted">Semua mitra Inner City sudah punya perjanjian.</p>'}</div></div>
+    </div>
+    <div class="card" id="kirimBox" style="margin-bottom:16px"><div class="card-head"><h2>Kirim perjanjian ke mitra</h2><span class="muted">Memuat daftar mitra…</span></div></div>
     <div class="card"><div class="card-head"><h2>Semua perjanjian dan progresnya</h2><span class="muted">${semua.length} perjanjian</span></div>
       <div style="overflow-x:auto"><table class="tbl" style="width:100%"><thead><tr style="text-align:left"><th>Mitra</th><th>Progres</th><th>Status</th><th>Nomor surat</th><th>Berakhir</th></tr></thead><tbody>${semua.map((x) => `<tr><td><a href="#/perjanjian/${x.id}">${esc(x.mitra)}</a>${x.inner_city ? '<br><small class="muted">Inner City</small>' : ''}</td><td>${ovStep(x.tahap)}</td><td><span class="chip ${OV_STATUS[x.status][1]}">${OV_STATUS[x.status][0]}</span></td><td>${esc(x.nomor_surat || '–')}</td><td>${x.tgl_berakhir ? tgl(x.tgl_berakhir) : '–'}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Belum ada perjanjian.</td></tr>'}</tbody></table></div></div>`;
   const go = () => { location.hash = q({ jenis: $('#ovj').value, kel: $('#ovk').value }); };
@@ -597,19 +597,71 @@ async function pageOverview(params) {
     toast(`${ok} perjanjian terkirim${gagal.length ? `, ${gagal.length} gagal (${gagal[0]})` : ''}`, gagal.length > 0 && ok === 0);
     route();
   };
-  $('[data-a="sekaligus"]').addEventListener('click', (e) => {
-    const n = d.daftar.filter((r) => r.status === 'belum_ada' && r.mitra?.ada_email !== false).length;
-    const tanpa = d.daftar.filter((r) => r.status === 'belum_ada' && r.mitra?.ada_email === false).length;
-    if (!n) { toast(tanpa ? `${tanpa} mitra belum punya email di info perseroan. Lengkapi dulu.` : 'Tidak ada mitra Inner City yang belum berperjanjian', true); return; }
-    if (!confirm(`Buat dan kirim perjanjian ke ${n} mitra Inner City sekarang?${tanpa ? ` ${tanpa} mitra dilewati karena email kosong.` : ''} Email memakai format di Pengaturan.`)) return;
-    busy(e.currentTarget, () => jalankan(null, e.currentTarget));
-  });
-  $$('[data-satu]').forEach((b) => b.addEventListener('click', () => { if (confirm('Buat dan kirim perjanjian ke mitra ini?')) busy(b, () => jalankan([Number(b.dataset.satu)], b)); }));
+  api('/api/overview/mitra').then((m) => kirimMitraUI($('#kirimBox'), m, d, jalankan)).catch((ex) => { const kb = $('#kirimBox'); if (kb) kb.innerHTML = `<div class="card-head"><h2>Kirim perjanjian ke mitra</h2></div><div class="empty">${esc(ex.message)}</div>`; });
   $('[data-a="arsipsemua"]').addEventListener('click', (e) => busy(e.currentTarget, async () => {
     let ok = 0; let gagal = 0;
     for (let g = 0; g < 30; g++) { const r = await post('/api/overview/arsip-semua', {}); r.hasil.forEach((h) => (h.ok ? ok++ : gagal++)); if (!r.sisa) break; }
     toast(`${ok} diarsipkan${gagal ? `, ${gagal} gagal` : ''}`, gagal > 0 && !ok); route();
   }));
+}
+
+
+// ---------- Kirim perjanjian ke mitra (semua mitra di info perseroan, filter Inner City) ----------
+const OVF = { q: '', kel: '', st: '', pj: 'belum', sel: new Set() };
+function kirimMitraUI(kb, mitra, d, jalankan) {
+  if (!kb || !kb.isConnected) return;
+  const F = OVF, MAKS = 300;
+  const statusMitra = [...new Set(mitra.map((m) => m.status_mitra))].sort();
+  const nIC = mitra.filter((m) => m.inner_city).length;
+  const layak = (m) => m.status === 'belum_ada' && m.ada_email;
+  const saring = () => mitra.filter((m) => (!F.q || m.nama.toUpperCase().includes(F.q.toUpperCase()))
+    && (!F.kel || (F.kel === 'inner' ? m.inner_city : !m.inner_city))
+    && (!F.st || m.status_mitra === F.st)
+    && (F.pj === 'semua' || (F.pj === 'belum' ? m.status === 'belum_ada' : m.status !== 'belum_ada')));
+  const tdkKetemu = d.daftar.filter((r) => r.status === 'tidak_ketemu').length;
+  kb.innerHTML = `<div class="card-head"><h2>Kirim perjanjian ke mitra</h2><span class="muted" data-kcount></span></div>
+    <div class="row" style="gap:12px;align-items:end;flex-wrap:wrap;margin-bottom:12px">
+      <div class="field" style="margin:0;flex:1 1 220px"><label for="kq">Cari mitra</label><input class="input" id="kq" placeholder="Nama mitra" value="${esc(F.q)}" autocomplete="off"></div>
+      <div class="field" style="margin:0"><label for="kkel">Kelompok</label><select class="input" id="kkel"><option value="">Semua mitra (${mitra.length})</option><option value="inner" ${F.kel === 'inner' ? 'selected' : ''}>Inner City (${nIC})</option><option value="lain" ${F.kel === 'lain' ? 'selected' : ''}>Bukan Inner City (${mitra.length - nIC})</option></select></div>
+      <div class="field" style="margin:0"><label for="kst">Status mitra</label><select class="input" id="kst"><option value="">Semua status</option>${statusMitra.map((x) => `<option value="${esc(x)}" ${F.st === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div>
+      <div class="field" style="margin:0"><label for="kpj">Perjanjian</label><select class="input" id="kpj"><option value="belum" ${F.pj === 'belum' ? 'selected' : ''}>Belum berperjanjian</option><option value="sudah" ${F.pj === 'sudah' ? 'selected' : ''}>Sudah berperjanjian</option><option value="semua" ${F.pj === 'semua' ? 'selected' : ''}>Semua</option></select></div>
+    </div>
+    <div class="row" style="gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
+      <button class="btn ghost sm" type="button" data-kpilih></button><button class="btn ghost sm" type="button" data-kbersih>Kosongkan pilihan</button>
+      <button class="btn" type="button" data-kkirim disabled>Kirim</button>
+      <span class="hint" style="margin:0">Dokumen dan email memakai format di Pengaturan. Mitra tanpa email di info perseroan tidak bisa dikirim.</span></div>
+    ${tdkKetemu ? `<p class="muted" style="margin:0 0 10px">${tdkKetemu} nama Inner City belum ketemu di info perseroan. Tekan "Cocokkan ulang Inner City".</p>` : ''}
+    <div data-ktabel style="overflow-x:auto"></div>`;
+  const isi = () => {
+    const list = saring(), L = list.filter(layak), tampilList = list.slice(0, MAKS);
+    for (const r of [...F.sel]) if (!mitra.find((m) => m.row === r && layak(m))) F.sel.delete(r);
+    $('[data-kcount]', kb).textContent = `${list.length} mitra tampil dari ${mitra.length} di info perseroan`;
+    $('[data-kpilih]', kb).textContent = `Pilih semua yang bisa dikirim (${L.length})`;
+    $('[data-kpilih]', kb).disabled = !L.length;
+    const kk = $('[data-kkirim]', kb); kk.disabled = !F.sel.size; kk.textContent = F.sel.size ? `Kirim ke ${F.sel.size} mitra terpilih` : 'Kirim ke mitra terpilih';
+    $('[data-ktabel]', kb).innerHTML = list.length ? `<table class="tbl" style="width:100%"><thead><tr style="text-align:left"><th style="width:34px"></th><th>Mitra</th><th>Kelompok</th><th>Perjanjian</th><th></th></tr></thead><tbody>${tampilList.map((m) => `<tr>
+      <td><input type="checkbox" data-kpil="${m.row}" aria-label="Pilih ${esc(m.nama)}" ${layak(m) ? '' : 'disabled'} ${F.sel.has(m.row) ? 'checked' : ''}></td>
+      <td><b>${esc(m.nama)}</b><div class="cell-sub">${esc([m.jenis, m.status_mitra].filter(Boolean).join(', '))}</div></td>
+      <td>${m.inner_city ? '<span class="chip c-info">Inner City</span>' : '<span class="muted">–</span>'}</td>
+      <td><span class="chip ${OV_STATUS[m.status][1]}">${OV_STATUS[m.status][0]}</span>${m.perjanjian_id ? ` <a href="#/perjanjian/${m.perjanjian_id}">Buka</a>` : ''}${!m.ada_email && m.status === 'belum_ada' ? ' <span class="chip c-warn" title="Lengkapi email di info perseroan">Email kosong</span>' : ''}</td>
+      <td style="text-align:right">${layak(m) ? `<button class="btn ghost sm" type="button" data-ksatu="${m.row}">Kirim</button>` : ''}</td></tr>`).join('')}</tbody></table>${list.length > MAKS ? `<p class="muted" style="margin:10px 0 0">Menampilkan ${MAKS} pertama dari ${list.length}. Persempit dengan filter atau pencarian; "Pilih semua" tetap mencakup seluruh ${L.length} mitra yang cocok.</p>` : ''}` : '<div class="empty">Tidak ada mitra yang cocok dengan filter</div>';
+    $$('[data-kpil]', kb).forEach((c) => c.addEventListener('change', () => { const r = Number(c.dataset.kpil); c.checked ? F.sel.add(r) : F.sel.delete(r); isi(); }));
+    $$('[data-ksatu]', kb).forEach((b) => b.addEventListener('click', () => { if (confirm('Buat dan kirim perjanjian ke mitra ini?')) { F.sel.delete(Number(b.dataset.ksatu)); busy(b, () => jalankan([Number(b.dataset.ksatu)], b)); } }));
+  };
+  let t;
+  $('#kq', kb).addEventListener('input', (e) => { clearTimeout(t); t = setTimeout(() => { F.q = e.target.value.trim(); isi(); }, 200); });
+  $('#kkel', kb).addEventListener('change', (e) => { F.kel = e.target.value; isi(); });
+  $('#kst', kb).addEventListener('change', (e) => { F.st = e.target.value; isi(); });
+  $('#kpj', kb).addEventListener('change', (e) => { F.pj = e.target.value; isi(); });
+  $('[data-kpilih]', kb).addEventListener('click', () => { saring().filter(layak).forEach((m) => F.sel.add(m.row)); isi(); });
+  $('[data-kbersih]', kb).addEventListener('click', () => { F.sel.clear(); isi(); });
+  $('[data-kkirim]', kb).addEventListener('click', (e) => {
+    const rows = [...F.sel]; if (!rows.length) return;
+    if (!confirm(`Buat dan kirim perjanjian ke ${rows.length} mitra sekarang? Email akan benar-benar terkirim ke mitra, memakai format di Pengaturan.`)) return;
+    F.sel.clear();
+    busy(e.currentTarget, () => jalankan(rows, e.currentTarget));
+  });
+  isi();
 }
 
 const EMAIL_BAWAAN = {
