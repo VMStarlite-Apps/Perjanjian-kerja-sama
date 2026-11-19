@@ -121,6 +121,7 @@ let L = 0, F = 0; const ok = (c, n, x = '') => { c ? L++ : F++; console.log((c ?
   ok(await p.evaluate(() => !!document.getElementById('pks-host').shadowRoot.querySelector('a.icon-btn[href="#/pks/pengaturan"]')), 'ikon gear Pengaturan ada di dalam fitur');
   await klik('a.icon-btn[href="#/pks/pengaturan"]');
   ok(await tunggu(/Format email ke mitra/), 'ikon gear → pengaturan tampil');
+  ok(await p.evaluate(() => { const t = document.getElementById('pks-host').shadowRoot.textContent; return !/Tambah atau ubah pengguna|Reset password|Pola nomor surat|Posisi tempel/.test(t); }), 'pengaturan sederhana: tanpa kartu pengguna & opsi teknis');
   await p.fill('#pks-host #ecc', 'cc.uji@pmosurge.co.id'); await klik('[data-e]'); await p.waitForTimeout(1200);
   await p.click('#nav-pks-ov'); await p.waitForTimeout(800); await klik('a.icon-btn[href="#/pks/pengaturan"]');
   await tunggu(/Format email ke mitra/);
